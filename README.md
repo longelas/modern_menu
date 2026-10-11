@@ -1,0 +1,157 @@
+# modern_menu
+
+A **Kobo-inspired** replacement for KOReader’s stock top menu. Same actions and submenus you already know — clearer layout, larger touch targets, and an e-ink friendly look.
+
+
+|                   |                                                                             |
+| ----------------- | --------------------------------------------------------------------------- |
+| **Plugin folder** | `modern_menu.koplugin`                                                      |
+| **Requires**      | [KOReader](https://github.com/koreader/koreader) (recent stable or nightly) |
+| **Platforms**     | E-ink devices and desktop (SDL) builds                                      |
+
+
+## Screenshots
+
+
+| Home      | Settings      | Nested submenu     |
+| --------- | ------------- | ------------------ |
+| Home menu | Settings menu | Wikipedia settings |
+
+
+
+| E-ink settings | Navigate      |
+| -------------- | ------------- |
+| E-ink settings | Navigate menu |
+
+
+---
+
+## Why this exists
+
+KOReader’s stock `TouchMenu` is powerful but dense: small rows, nested chrome, and a look that feels more “utility panel” than a modern e-reader shell.
+
+**modern_menu** keeps the *live* KOReader menu tree (callbacks, checks, holds, plugins — nothing hardcoded) and presents it with:
+
+- Touch-first rows and clear hierarchy  
+- High-contrast monochrome styling suited to e-ink  
+- Optional Kobo-like status chrome in the menu (and file browser)
+
+If you want Nickel-like clarity without giving up KOReader’s depth, this plugin is for you.
+
+---
+
+## Features
+
+### Full menu replacement
+
+- Hooks `ui.menu.onShowMenu` so swipe-down / Menu key opens Modern Menu instead of stock TouchMenu  
+- Renders the real `tab_item_table` — every stock and plugin entry still works  
+- Breadcrumbs for nested menus; back (`‹`) and close (`✕`) in the header  
+- Underline tab bar with KOReader `appbar.`* icons  
+- Hairline separators between items; category groups with subtle zebra striping  
+- Gray toggle switches and vertical scrollbar (no fake horizontal scroll)
+
+### Status bar (menu + optional file browser)
+
+Shown at the top of the modern menu:
+
+
+| Control                | Action                                             |
+| ---------------------- | -------------------------------------------------- |
+| **Time**               | Current time                                       |
+| **Toggle** (menu only) | Show / hide the status bar in the **file browser** |
+| **Wi‑Fi**              | Open KOReader network / Wi‑Fi UI                   |
+| **Brightness**         | Frontlight panel (devices with a light only)       |
+| **Battery %**          | Opens **Battery statistics** (batterystat plugin)  |
+
+
+The status bar is **never** injected into the reader view — use KOReader’s own header/footer settings while reading.
+
+### Escape hatch
+
+Dispatcher actions (also usable from gestures / profiles):
+
+- **Modern menu** — open the menu  
+- **Toggle stock KOReader menu** — flip between Modern Menu and stock TouchMenu (persisted)
+
+---
+
+## Installation
+
+Copy the `modern_menu.koplugin` folder into your KOReader plugins directory, then restart KOReader (or reload plugins) and enable **Modern Menu** under **Tools → More tools → Plugin management**.
+
+Typical plugins paths:
+
+
+| Install type        | Path                                             |
+| ------------------- | ------------------------------------------------ |
+| **E-ink device**    | `koreader/plugins/` next to the KOReader install |
+| **Linux / desktop** | `~/.config/koreader/plugins/`                    |
+| **Android**         | Under KOReader’s data dir → `plugins/`           |
+
+
+The folder name must end with `.koplugin`.
+
+### Uninstall
+
+Remove or disable `modern_menu.koplugin`, then restart KOReader. To go back temporarily without uninstalling, use **Toggle stock KOReader menu**.
+
+---
+
+## Usage tips
+
+- **Swipe down** from the top edge still opens the menu; Modern Menu consumes that gesture so stock TouchMenu does not also appear.  
+- **Tap** a row for the usual action; **long-press** where stock supported it (help text, style-tweak details, book-specific CSS editor, etc.).   
+- Status bar **toggle** (left of the Wi‑Fi icon in the menu) controls the file-browser bar only; the menu always keeps its own bar so you can turn it back on.
+
+---
+
+- No smooth animations or continuous scroll physics  
+- No translucent overlays or drop shadows  
+- Solid borders / high-contrast text  
+- Screen refreshes (`setDirty`) only on real state changes
+
+Status icons are free [Lucide](https://lucide.dev/) SVGs (ISC); see `[modern_menu.koplugin/icons/NOTICE](modern_menu.koplugin/icons/NOTICE)`.
+
+---
+
+## Repository layout
+
+```text
+modern_menu.koplugin/     ← install this folder
+  _meta.lua               Plugin name & description
+  main.lua                Hook + file-browser status chrome
+  ui/                     Menu shell, tab bar
+  widgets/                Rows, toggles, status bar, breadcrumbs
+  icons/                  Lucide SVGs + NOTICE
+```
+
+---
+
+## Compatibility & limitations
+
+- Targets current KOReader Lua plugin APIs (`UIManager`, `TouchMenu`-compatible `closeMenu` / `updateItems`).  
+- If a future KOReader release changes menu internals, update the plugin or use the stock-menu toggle.  
+- Frontlight control appears only when `Device:hasFrontlight()` is true.  
+- Battery statistics requires the stock **batterystat** plugin (ships with KOReader).
+
+---
+
+## Contributing
+
+Issues and pull requests are welcome. Please keep e-ink constraints in mind (no animation-heavy UI, prefer solid contrast, avoid patching KOReader core — this plugin injects via `UIManager` only).
+
+---
+
+## Credits
+
+- [KOReader](https://github.com/koreader/koreader) — host application and menu data  
+- [Lucide](https://lucide.dev/) — status bar icons (ISC License)  
+- Inspired by the clarity of Kobo’s Nickel UI (no proprietary Kobo assets are included)
+
+---
+
+## License
+
+Plugin code: see the repository license file (add one before publishing if you have not already).  
+Icons under `modern_menu.koplugin/icons/`: **ISC** (Lucide); attribution in `icons/NOTICE`.
