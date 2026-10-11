@@ -12,16 +12,16 @@ A **Kobo-inspired** replacement for KOReader’s stock top menu. Same actions an
 
 ## Screenshots
 
+<p align="center">
+  <img src="screenshots/Screenshot1.png" alt="Home menu" width="30%" />
+  <img src="screenshots/Screenshot2.png" alt="Settings menu" width="30%" />
+  <img src="screenshots/Screenshot3.png" alt="Wikipedia settings" width="30%" />
+</p>
 
-| Home      | Settings      | Nested submenu     |
-| --------- | ------------- | ------------------ |
-| Home menu | Settings menu | Wikipedia settings |
-
-
-
-| E-ink settings | Navigate      |
-| -------------- | ------------- |
-| E-ink settings | Navigate menu |
+<p align="center">
+  <img src="screenshots/Screenshot4.png" alt="E-ink settings" width="30%" />
+  <img src="screenshots/Screenshot5.png" alt="Navigate menu" width="30%" />
+</p>
 
 
 ---
