@@ -211,6 +211,19 @@ function ModernMenu:addToMainMenu(menu_items)
                 end,
             },
             {
+                text = _("Pure black (no greys)"),
+                checked_func = function()
+                    return Settings.getPureBlack()
+                end,
+                keep_menu_open = true,
+                callback = function(touchmenu_instance)
+                    Settings.setPureBlack(not Settings.getPureBlack())
+                    if touchmenu_instance then
+                        touchmenu_instance:updateItems()
+                    end
+                end,
+            },
+            {
                 text = _("Reset to defaults"),
                 keep_menu_open = true,
                 callback = function(touchmenu_instance)

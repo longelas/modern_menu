@@ -3,6 +3,7 @@ Persisted Modern Menu preferences (G_reader_settings).
 @module modern_menu.settings
 --]]
 
+local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
 local Screen = Device.screen
 
@@ -13,18 +14,19 @@ local KEY_TAB_ICONS_ONLY = "modern_menu_tab_icons_only"
 local KEY_TAB_ICON_SIZE = "modern_menu_tab_icon_size"
 local KEY_OPTION_FONT_SIZE = "modern_menu_option_font_size"
 local KEY_OPTION_PADDING = "modern_menu_option_padding"
+local KEY_PURE_BLACK = "modern_menu_pure_black"
 
--- Defaults tuned for phone-sized screens; still readable on e-ink.
-Settings.DEFAULT_TAB_FONT_SIZE = 15
+-- Defaults tuned for phone / e-ink readability.
+Settings.DEFAULT_TAB_FONT_SIZE = 17
 Settings.MIN_TAB_FONT_SIZE = 12
-Settings.MAX_TAB_FONT_SIZE = 22
+Settings.MAX_TAB_FONT_SIZE = 26
 
-Settings.DEFAULT_TAB_ICON_SIZE = 24
+Settings.DEFAULT_TAB_ICON_SIZE = 26
 Settings.DEFAULT_TAB_ICON_SIZE_ICONS_ONLY = 32
 Settings.MIN_TAB_ICON_SIZE = 20
 Settings.MAX_TAB_ICON_SIZE = 40
 
-Settings.DEFAULT_OPTION_FONT_SIZE = 19
+Settings.DEFAULT_OPTION_FONT_SIZE = 22
 Settings.MIN_OPTION_FONT_SIZE = 8
 Settings.MAX_OPTION_FONT_SIZE = 28
 
@@ -34,15 +36,13 @@ Settings.DEFAULT_OPTION_PADDING = 6
 Settings.MIN_OPTION_PADDING = -10
 Settings.MAX_OPTION_PADDING = 20
 
---- Near-black for unselected tab chrome (COLOR_DARK_GRAY / 0x88 is too pale on phones).
-Settings.UNSELECTED_FG = require("ffi/blitbuffer").COLOR_GRAY_3
-
 local ALL_KEYS = {
     KEY_TAB_FONT_SIZE,
     KEY_TAB_ICONS_ONLY,
     KEY_TAB_ICON_SIZE,
     KEY_OPTION_FONT_SIZE,
     KEY_OPTION_PADDING,
+    KEY_PURE_BLACK,
 }
 
 local function read(key, default)
@@ -177,6 +177,73 @@ function Settings.getOptionPaddingPx()
     local scaled = Screen:scaleBySize(math.abs(pad))
     return pad < 0 and -scaled or scaled
 end
+
+function Settings.getPureBlack()
+    return read(KEY_PURE_BLACK, false) and true or false
+end
+
+function Settings.setPureBlack(enabled)
+    write(KEY_PURE_BLACK, enabled and true or false)
+end
+
+--- Secondary / unselected text. Pure black mode uses solid black.
+function Settings.getMutedFg()
+    if Settings.getPureBlack() then
+        return Blitbuffer.COLOR_BLACK
+    end
+    return Blitbuffer.COLOR_GRAY_3
+end
+
+--- Disabled option text.
+function Settings.getDisabledFg()
+    if Settings.getPureBlack() then
+        return Blitbuffer.COLOR_BLACK
+    end
+    return Blitbuffer.COLOR_DARK_GRAY
+end
+
+--- Hairline separators between options.
+function Settings.getSeparatorFg()
+    if Settings.getPureBlack() then
+        return Blitbuffer.COLOR_BLACK
+    end
+    return Blitbuffer.COLOR_GRAY
+end
+
+--- Tab / section divider rule under the tab bar.
+function Settings.getRuleFg()
+    if Settings.getPureBlack() then
+        return Blitbuffer.COLOR_BLACK
+    end
+    return Blitbuffer.COLOR_GRAY_5
+end
+
+--- Scrollbar ink.
+function Settings.getScrollbarFg()
+    if Settings.getPureBlack() then
+        return Blitbuffer.COLOR_BLACK
+    end
+    return Blitbuffer.COLOR_DARK_GRAY
+end
+
+--- Toggle switch chrome.
+function Settings.getToggleFg()
+    if Settings.getPureBlack() then
+        return Blitbuffer.COLOR_BLACK
+    end
+    return Blitbuffer.COLOR_DARK_GRAY
+end
+
+--- Category zebra stripe (disabled in pure black for max contrast).
+function Settings.getStripeBg()
+    if Settings.getPureBlack() then
+        return Blitbuffer.COLOR_WHITE
+    end
+    return Blitbuffer.COLOR_GRAY_E
+end
+
+-- Back-compat alias used by older call sites.
+Settings.UNSELECTED_FG = Blitbuffer.COLOR_GRAY_3
 
 --- Remove all Modern Menu preference keys so getters return defaults.
 function Settings.resetToDefaults()

@@ -1,5 +1,5 @@
 --[[--
-Rounded e-ink toggle switch — muted gray to match Kobo chrome.
+Rounded e-ink toggle switch — muted gray by default, pure black when enabled.
 @module modern_menu.widgets.toggle_switch
 --]]
 
@@ -9,6 +9,7 @@ local Size = require("ui/size")
 local Widget = require("ui/widget/widget")
 local Device = require("device")
 local Screen = Device.screen
+local Settings = require("settings")
 
 local ToggleSwitch = Widget:extend{
     checked = false,
@@ -38,8 +39,7 @@ function ToggleSwitch:paintTo(bb, x, y)
     local r = math.floor(h / 2)
     local checked = self.checked
     local bw = math.max(1, Size.border.thin)
-    -- Match Kobo: soft gray chrome, not pure black
-    local ink = Blitbuffer.COLOR_DARK_GRAY
+    local ink = Settings.getToggleFg()
 
     if checked then
         bb:paintRoundedRect(x, y, w, h, ink, r)

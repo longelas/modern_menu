@@ -199,7 +199,7 @@ function StatusBar:_rebuild()
     local battery_w = TextWidget:new{
         text = self:_batteryText(),
         face = Font:getFace("xx_smallinfofont", 13),
-        fgcolor = Blitbuffer.COLOR_DARK_GRAY,
+        fgcolor = require("settings").getMutedFg(),
     }
     local battery_btn = FrameContainer:new{
         bordersize = 0,

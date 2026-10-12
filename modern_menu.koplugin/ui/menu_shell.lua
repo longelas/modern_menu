@@ -33,12 +33,10 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Screen = Device.screen
 local _ = require("gettext")
 
--- Match toggle chrome; scrollbars default to black in stock widgets
-local SCROLLBAR_COLOR = Blitbuffer.COLOR_DARK_GRAY
-
 local TabBar = require("ui/tab_bar")
 local Breadcrumb = require("widgets/breadcrumb")
 local MenuItemCard = require("widgets/menu_item_card")
+local Settings = require("settings")
 local StatusBar = require("widgets/status_bar")
 
 local ICON_TITLES = {
@@ -201,20 +199,21 @@ function ModernMenuShell:init()
         end,
     }
 
-    -- Slightly heavier, darker rule with breathing room — clear without shouting.
+    -- Slightly heavier rule with breathing room — clear without shouting.
     local rule_w = content_w - 2 * self.side_margin
+    self.tab_rule_line = LineWidget:new{
+        background = Settings.getRuleFg(),
+        dimen = Geom:new{
+            w = rule_w,
+            h = math.max(Size.line.thick, Screen:scaleBySize(2)),
+        },
+    }
     self.tab_rule = VerticalGroup:new{
         align = "left",
         VerticalSpan:new{ width = Screen:scaleBySize(4) },
         HorizontalGroup:new{
             HorizontalSpan:new{ width = self.side_margin },
-            LineWidget:new{
-                background = Blitbuffer.COLOR_GRAY_5,
-                dimen = Geom:new{
-                    w = rule_w,
-                    h = math.max(Size.line.thick, Screen:scaleBySize(2)),
-                },
-            },
+            self.tab_rule_line,
         },
         VerticalSpan:new{ width = Screen:scaleBySize(8) },
     }
@@ -268,11 +267,12 @@ function ModernMenuShell:init()
             sc._crop_h = sc.dimen.h
         else
             sc._is_scrollable = true
+            local scroll_ink = Settings.getScrollbarFg()
             sc._v_scroll_bar = VerticalScrollBar:new{
                 width = sc.scroll_bar_width,
                 height = sc.dimen.h,
-                bordercolor = SCROLLBAR_COLOR,
-                rectcolor = SCROLLBAR_COLOR,
+                bordercolor = scroll_ink,
+                rectcolor = scroll_ink,
                 scroll_callback = function(ratio)
                     sc:scrollToRatio(nil, ratio)
                 end,
@@ -460,7 +460,7 @@ function ModernMenuShell:_rebuildContent()
             TextWidget:new{
                 text = _("No items in this menu."),
                 face = Font:getFace("smallinfofont", 18),
-                fgcolor = Blitbuffer.COLOR_DARK_GRAY,
+                fgcolor = Settings.getMutedFg(),
             },
         })
     else
@@ -511,6 +511,9 @@ function ModernMenuShell:refresh()
             self.list_dimen.h = math.max(Screen:scaleBySize(120), self.list_dimen.h - delta)
             self.scroll_container.dimen.h = self.list_dimen.h
         end
+    end
+    if self.tab_rule_line then
+        self.tab_rule_line.background = Settings.getRuleFg()
     end
     self:_rebuildContent()
     UIManager:setDirty(self:_dirtyTarget(), "ui")

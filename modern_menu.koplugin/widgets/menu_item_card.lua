@@ -25,9 +25,6 @@ local Screen = Device.screen
 local ToggleSwitch = require("widgets/toggle_switch")
 local Settings = require("settings")
 
--- Subtle e-ink zebra stripe (0xEE); pairs with COLOR_WHITE
-local STRIPE_GRAY = Blitbuffer.COLOR_GRAY_E
-
 local MenuItemCard = InputContainer:extend{
     item = nil,
     width = nil,
@@ -104,7 +101,7 @@ function MenuItemCard:init()
     local checked = item_checked(item)
     local submenu = has_submenu(item)
     local text = item_text(item)
-    local fg = enabled and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_DARK_GRAY
+    local fg = enabled and Blitbuffer.COLOR_BLACK or Settings.getDisabledFg()
     local inner_w = self.width - side_margin * 2
     -- Soft inset so text / › sit inside the stripe, not on its edges
     local content_pad = Screen:scaleBySize(12)
@@ -143,14 +140,14 @@ function MenuItemCard:init()
         trailing = TextWidget:new{
             text = "›",
             face = Font:getFace("cfont", math.max(20, option_font + 4)),
-            fgcolor = Blitbuffer.COLOR_DARK_GRAY,
+            fgcolor = Settings.getMutedFg(),
         }
     elseif checked ~= nil then
         if item.radio then
             trailing = TextWidget:new{
                 text = checked and "◉" or "○",
                 face = Font:getFace("smallinfofont", math.max(16, option_font - 1)),
-                fgcolor = Blitbuffer.COLOR_DARK_GRAY,
+                fgcolor = Settings.getMutedFg(),
             }
         else
             trailing = ToggleSwitch:new{ checked = checked }
@@ -180,7 +177,7 @@ function MenuItemCard:init()
         },
     }
 
-    local bg = (self.stripe == 1) and STRIPE_GRAY or Blitbuffer.COLOR_WHITE
+    local bg = (self.stripe == 1) and Settings.getStripeBg() or Blitbuffer.COLOR_WHITE
 
     -- Stripe fills only the content column (side margins stay white)
     local body = FrameContainer:new{
@@ -214,7 +211,7 @@ function MenuItemCard:init()
                 background = bg,
                 width = inner_w,
                 LineWidget:new{
-                    background = Blitbuffer.COLOR_GRAY,
+                    background = Settings.getSeparatorFg(),
                     dimen = Geom:new{
                         w = inner_w,
                         h = Size.line.thin,

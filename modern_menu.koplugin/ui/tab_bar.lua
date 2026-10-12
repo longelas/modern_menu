@@ -101,7 +101,7 @@ function TabBar:_rebuildTabs()
     local tab_w = math.floor(self.inner_width / count)
     local label_max = math.max(Screen:scaleBySize(12), tab_w - Screen:scaleBySize(8))
     local icon_px = math.min(self.icon_size, math.max(Screen:scaleBySize(16), tab_w - Screen:scaleBySize(8)))
-    local unselected_fg = Settings.UNSELECTED_FG
+    local unselected_fg = Settings.getMutedFg()
 
     for i, tab in ipairs(self.tabs) do
         local selected = (i == self.selected)

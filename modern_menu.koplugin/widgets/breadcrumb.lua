@@ -60,7 +60,7 @@ function Breadcrumb:_rebuild()
             text = tostring(name),
             face = Font:getFace("xx_smallinfofont", is_last and 16 or 15),
             bold = is_last,
-            fgcolor = is_last and Blitbuffer.COLOR_BLACK or Settings.UNSELECTED_FG,
+            fgcolor = is_last and Blitbuffer.COLOR_BLACK or Settings.getMutedFg(),
             max_width = math.floor(max_total / math.max(n, 1)),
         }
         table.insert(row, label)
@@ -72,7 +72,7 @@ function Breadcrumb:_rebuild()
             table.insert(row, TextWidget:new{
                 text = sep,
                 face = Font:getFace("xx_smallinfofont", 15),
-                fgcolor = Settings.UNSELECTED_FG,
+                fgcolor = Settings.getMutedFg(),
             })
         end
     end
