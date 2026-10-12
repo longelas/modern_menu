@@ -86,6 +86,12 @@ function TabBar:init()
                 range = self.dimen,
             },
         },
+        HoldSelect = {
+            GestureRange:new{
+                ges = "hold",
+                range = self.dimen,
+            },
+        },
     }
 end
 
@@ -107,6 +113,7 @@ function TabBar:_rebuildTabs()
         local selected = (i == self.selected)
         local parts = VerticalGroup:new{ align = "center" }
 
+        local showed_icon = false
         if tab.icon and tab.icon ~= "" then
             local ok, icon = pcall(function()
                 return IconWidget:new{
@@ -118,6 +125,7 @@ function TabBar:_rebuildTabs()
                 }
             end)
             if ok and icon then
+                showed_icon = true
                 table.insert(parts, icon)
                 if not self.icons_only then
                     table.insert(parts, VerticalSpan:new{ width = Screen:scaleBySize(2) })
@@ -125,7 +133,9 @@ function TabBar:_rebuildTabs()
             end
         end
 
-        if not self.icons_only then
+        -- Icons-only still needs a label when the icon name is unknown
+        -- (Quick Menu's "home" / "exit" glyphs, for example).
+        if not self.icons_only or not showed_icon then
             table.insert(parts, TextWidget:new{
                 text = tab.title,
                 face = Font:getFace("xx_smallinfofont", self.face_size),
@@ -159,20 +169,39 @@ function TabBar:setSelected(index, skip_callback)
 end
 
 function TabBar:onTapSelect(_, ges)
-    if not ges or not ges.pos or not self.dimen then
+    local index = self:_indexAt(ges)
+    if not index then
         return false
+    end
+    self:setSelected(index)
+    return true
+end
+
+function TabBar:onHoldSelect(_, ges)
+    local index = self:_indexAt(ges)
+    if not index or not self.on_hold then
+        return false
+    end
+    return self.on_hold(self.tabs[index].id, index) == true
+end
+
+function TabBar:_indexAt(ges)
+    if not ges or not ges.pos or not self.dimen then
+        return nil
     end
     local count = math.max(#self.tabs, 1)
     local tab_w = math.floor(self.inner_width / count)
+    if tab_w <= 0 then
+        return nil
+    end
     local rel_x = ges.pos.x - self.dimen.x - self.side_margin
     if rel_x < 0 or rel_x >= self.inner_width then
-        return false
+        return nil
     end
     local index = math.floor(rel_x / tab_w) + 1
     if index < 1 then index = 1 end
     if index > #self.tabs then index = #self.tabs end
-    self:setSelected(index)
-    return true
+    return index
 end
 
 return TabBar

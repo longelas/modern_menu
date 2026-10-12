@@ -1,3 +1,6 @@
 # Local KOReader AppImage extract (dev only)
 koreader.AppImage
 squashfs-root/
+
+# Downloaded for side-by-side testing; not part of this repo
+quickmenu.koplugin/

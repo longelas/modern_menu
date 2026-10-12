@@ -3,15 +3,20 @@
 # Arch's /usr/bin/hwdetect (mkinitcpio) collides with KOReader's Kobo detection
 # when running the stock AppImage directly.
 #
-# Also points ~/.config/koreader/plugins/modern_menu.koplugin at this repo's
-# plugin so local edits are what KOReader loads.
+# Points ~/.config/koreader/plugins/ at this repo's Modern Menu and at the
+# local quickmenu.koplugin checkout so both load together.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXTRACTED="${ROOT}/squashfs-root"
 APPRUN="${EXTRACTED}/AppRun"
-PLUGIN_SRC="${ROOT}/modern_menu.koplugin"
-PLUGIN_DST="${HOME}/.config/koreader/plugins/modern_menu.koplugin"
+PLUGIN_DIR="${HOME}/.config/koreader/plugins"
+# modern_menu is required; quickmenu is the optional local download used to
+# test the two plugins side by side.
+PLUGINS=(
+  modern_menu.koplugin
+  quickmenu.koplugin
+)
 
 if [[ ! -x "${APPRUN}" ]]; then
   echo "Extracted AppImage not found. Run:"
@@ -19,18 +24,25 @@ if [[ ! -x "${APPRUN}" ]]; then
   exit 1
 fi
 
-if [[ ! -d "${PLUGIN_SRC}" ]]; then
-  echo "Plugin folder missing: ${PLUGIN_SRC}"
-  exit 1
-fi
-
-mkdir -p "$(dirname "${PLUGIN_DST}")"
-# Replace a previous symlink/dir so we always load this checkout's plugin.
-if [[ -e "${PLUGIN_DST}" || -L "${PLUGIN_DST}" ]]; then
-  rm -rf "${PLUGIN_DST}"
-fi
-ln -s "${PLUGIN_SRC}" "${PLUGIN_DST}"
-echo "Using plugin: ${PLUGIN_DST} -> ${PLUGIN_SRC}"
+mkdir -p "${PLUGIN_DIR}"
+for name in "${PLUGINS[@]}"; do
+  src="${ROOT}/${name}"
+  dst="${PLUGIN_DIR}/${name}"
+  if [[ ! -d "${src}" ]]; then
+    if [[ "${name}" == "modern_menu.koplugin" ]]; then
+      echo "Plugin folder missing: ${src}"
+      exit 1
+    fi
+    echo "Skipping ${name} (not present at ${src})"
+    continue
+  fi
+  # Replace a previous symlink/dir so we always load this checkout's plugin.
+  if [[ -e "${dst}" || -L "${dst}" ]]; then
+    rm -rf "${dst}"
+  fi
+  ln -s "${src}" "${dst}"
+  echo "Using plugin: ${dst} -> ${src}"
+done
 
 export KOREADER_FORCE_SDL=1
 # Help SDL device identify as AppImage when running from extracted tree

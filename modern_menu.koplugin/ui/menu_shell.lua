@@ -30,9 +30,11 @@ local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalScrollBar = require("ui/widget/verticalscrollbar")
 local VerticalSpan = require("ui/widget/verticalspan")
+local logger = require("logger")
 local Screen = Device.screen
 local _ = require("gettext")
 
+local QuickMenuHost = require("ui/quickmenu_host")
 local TabBar = require("ui/tab_bar")
 local Breadcrumb = require("widgets/breadcrumb")
 local MenuItemCard = require("widgets/menu_item_card")
@@ -62,6 +64,8 @@ local ID_TITLES = {
     filemanager_settings = _("Library"),
     main = _("Home"),
     plus_menu = _("New"),
+    quick_menu_tab = _("Quick menu"),
+    exit_tab = _("Exit"),
 }
 
 local ID_TAB_LABELS = {
@@ -74,6 +78,8 @@ local ID_TAB_LABELS = {
     filemanager_settings = _("Library"),
     main = _("Home"),
     plus_menu = _("New"),
+    quick_menu_tab = _("Quick"),
+    exit_tab = _("Exit"),
 }
 
 local ModernMenuShell = InputContainer:extend{
@@ -197,6 +203,18 @@ function ModernMenuShell:init()
         on_change = function(_, index)
             self:switchMenuTab(index)
         end,
+        -- Quick Menu opens its settings from a hold on the tab icon.
+        on_hold = function(_, index)
+            local tab = self.tab_item_table[index]
+            if not tab or type(tab.hold_callback) ~= "function" then
+                return false
+            end
+            local ok, err = pcall(tab.hold_callback)
+            if not ok then
+                logger.warn("modern_menu: tab hold failed: " .. tostring(err))
+            end
+            return true
+        end,
     }
 
     -- Slightly heavier rule with breathing room — clear without shouting.
@@ -237,6 +255,8 @@ function ModernMenuShell:init()
         Screen:scaleBySize(120),
         self.dimen.h - self.status_h - header_h - tabs_h - rule_h - Screen:scaleBySize(4)
     )
+    -- Scroll height before an optional Quick Menu footer is subtracted.
+    self.list_h_base = list_h
     self.list_dimen = Geom:new{
         w = content_w,
         h = list_h,
@@ -290,6 +310,8 @@ function ModernMenuShell:init()
         end
     end
     self.cropping_widget = self.scroll_container
+    -- Quick Menu footer sits under the list and is empty on other tabs.
+    self.qm_footer_slot = VerticalGroup:new{ align = "center" }
 
     self.panel = FrameContainer:new{
         bordersize = 0,
@@ -305,6 +327,7 @@ function ModernMenuShell:init()
             self.tab_bar,
             self.tab_rule,
             self.scroll_container,
+            self.qm_footer_slot,
         },
     }
 
@@ -438,66 +461,132 @@ function ModernMenuShell:_dirtyTarget()
     return self.show_parent or self
 end
 
-function ModernMenuShell:_rebuildContent()
-    if self.list_group.clear then
-        self.list_group:clear()
+function ModernMenuShell:_clearGroup(group)
+    if not group then
+        return
+    end
+    if group.clear then
+        group:clear()
     else
-        for i = #self.list_group, 1, -1 do
-            self.list_group[i] = nil
+        for i = #group, 1, -1 do
+            group[i] = nil
         end
     end
+end
 
-    local items = self:_visibleItems()
-    -- Leave room for the v-scrollbar so content never overflows horizontally
-    local width = self.list_content_w or (self.dimen.w - (self.scrollbar_gutter or 0))
-    local dirty_parent = self:_dirtyTarget()
+function ModernMenuShell:_emptyNotice(text)
+    return FrameContainer:new{
+        bordersize = 0,
+        padding = self.side_margin,
+        background = Blitbuffer.COLOR_WHITE,
+        TextWidget:new{
+            text = text,
+            face = Font:getFace("smallinfofont", 18),
+            fgcolor = Settings.getMutedFg(),
+        },
+    }
+end
 
-    if #items == 0 then
-        table.insert(self.list_group, FrameContainer:new{
-            bordersize = 0,
-            padding = self.side_margin,
-            background = Blitbuffer.COLOR_WHITE,
-            TextWidget:new{
-                text = _("No items in this menu."),
-                face = Font:getFace("smallinfofont", 18),
-                fgcolor = Settings.getMutedFg(),
-            },
-        })
+function ModernMenuShell:_rebuildContent()
+    self:_clearGroup(self.list_group)
+    self:_clearGroup(self.qm_footer_slot)
+
+    local panel_widget, footer_widget, panel_err
+    local ok_qm, err_qm = pcall(function()
+        panel_widget, footer_widget, panel_err = QuickMenuHost.fill(self)
+    end)
+    if not ok_qm then
+        logger.warn("modern_menu: quickmenu host failed: " .. tostring(err_qm))
+        panel_widget, footer_widget, panel_err = nil, nil, err_qm
+    end
+
+    if footer_widget and self.qm_footer_slot then
+        table.insert(self.qm_footer_slot, VerticalSpan:new{ width = Size.span.vertical_default })
+        table.insert(self.qm_footer_slot, footer_widget)
+    end
+
+    local footer_h = 0
+    if self.qm_footer_slot and footer_widget then
+        local slot_size = self.qm_footer_slot:getSize()
+        footer_h = slot_size and slot_size.h or 0
+    end
+    if self.list_h_base and self.list_dimen and self.scroll_container then
+        local list_h = math.max(Screen:scaleBySize(80), self.list_h_base - footer_h)
+        self.list_dimen.h = list_h
+        self.scroll_container.dimen.h = list_h
+    end
+
+    local content = self.list_group
+    if panel_widget then
+        content = panel_widget
     else
-        -- Alternate white / light-gray by stock category (item.separator ends a group)
-        local stripe = 0
-        for i, item in ipairs(items) do
-            table.insert(self.list_group, MenuItemCard:new{
-                item = item,
-                width = width,
-                side_margin = self.side_margin,
-                show_parent = dirty_parent,
-                menu = self,
-                index = i,
-                show_separator = i < #items,
-                stripe = stripe,
-            })
-            if item.separator then
-                stripe = 1 - stripe
+        local tab = self.tab_item_table and self.tab_item_table[self.last_index]
+        local nested = self.item_table_stack and #self.item_table_stack > 0
+        if tab and tab.panel and not nested then
+            table.insert(self.list_group, self:_emptyNotice(QuickMenuHost.failureMessage()))
+        else
+            local items = self:_visibleItems()
+            -- Leave room for the v-scrollbar so content never overflows horizontally
+            local width = self.list_content_w or (self.dimen.w - (self.scrollbar_gutter or 0))
+            local dirty_parent = self:_dirtyTarget()
+
+            if #items == 0 then
+                table.insert(self.list_group, self:_emptyNotice(_("No items in this menu.")))
+            else
+                -- Alternate white / light-gray by stock category (item.separator ends a group)
+                local stripe = 0
+                for i, item in ipairs(items) do
+                    table.insert(self.list_group, MenuItemCard:new{
+                        item = item,
+                        width = width,
+                        side_margin = self.side_margin,
+                        show_parent = dirty_parent,
+                        menu = self,
+                        index = i,
+                        show_separator = i < #items,
+                        stripe = stripe,
+                    })
+                    if item.separator then
+                        stripe = 1 - stripe
+                    end
+                end
             end
         end
     end
 
-    -- Reset scroll state so the next paint recomputes overflow + scrollbar
-    self.scroll_container[1] = self.list_group
-    self.scroll_container._scroll_offset_x = 0
-    self.scroll_container._scroll_offset_y = 0
-    if self.scroll_container._bb then
-        self.scroll_container._bb:free()
-        self.scroll_container._bb = nil
+    -- Reset scroll state so the next paint recomputes overflow + scrollbar.
+    -- A live _bb would blit the previous button glyphs over the new panel.
+    self.scroll_container[1] = content
+    if self.scroll_container.reset then
+        self.scroll_container:reset()
+    else
+        self.scroll_container._scroll_offset_x = 0
+        self.scroll_container._scroll_offset_y = 0
+        if self.scroll_container._bb then
+            self.scroll_container._bb:free()
+            self.scroll_container._bb = nil
+        end
+        self.scroll_container._is_scrollable = nil
     end
     self.scroll_container._v_scroll_bar = nil
     self.scroll_container._h_scroll_bar = nil
-    self.scroll_container._is_scrollable = nil
+
+    local column = self.panel and self.panel[1]
+    if column and column.resetLayout then
+        column:resetLayout()
+    end
 
     if self.breadcrumb then
         self.breadcrumb:setCrumbs(self:_breadcrumbCrumbs())
     end
+end
+
+--- Rebuild the Quick Menu body without reloading tab chrome.
+-- A toggle only needs new button glyphs. Reloading the tab bar first
+-- can paint the shell while those glyphs still show the previous state.
+function ModernMenuShell:refreshQuickMenu()
+    self:_rebuildContent()
+    UIManager:setDirty(self:_dirtyTarget(), "ui")
 end
 
 function ModernMenuShell:refresh()
@@ -507,9 +596,8 @@ function ModernMenuShell:refresh()
         local old_h = self.tab_bar.height
         self.tab_bar:reloadFromSettings()
         local delta = self.tab_bar.height - old_h
-        if delta ~= 0 and self.list_dimen and self.scroll_container then
-            self.list_dimen.h = math.max(Screen:scaleBySize(120), self.list_dimen.h - delta)
-            self.scroll_container.dimen.h = self.list_dimen.h
+        if delta ~= 0 and self.list_h_base then
+            self.list_h_base = math.max(Screen:scaleBySize(120), self.list_h_base - delta)
         end
     end
     if self.tab_rule_line then

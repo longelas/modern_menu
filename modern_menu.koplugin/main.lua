@@ -24,6 +24,7 @@ local T = require("ffi/util").template
 local Screen = Device.screen
 
 local ModernMenuShell = require("ui/menu_shell")
+local QuickMenuHost = require("ui/quickmenu_host")
 local Settings = require("settings")
 local StatusBar = require("widgets/status_bar")
 
@@ -474,6 +475,9 @@ function ModernMenu:showModernMenu(menu_self, tab_index)
     if menu_self.tab_item_table == nil and menu_self.setUpdateItemTable then
         menu_self:setUpdateItemTable()
     end
+    -- Quick Menu inserts its panel tab from setUpdateItemTable. Sync again
+    -- so the tab is present even if that table was built earlier.
+    QuickMenuHost.sync(menu_self)
 
     -- Match ReaderMenu: stop selection / close bottom config
     if menu_self.ui and menu_self.ui.keyselection and menu_self.ui.keyselection.stopHighlightIndicator then
@@ -493,9 +497,7 @@ function ModernMenu:showModernMenu(menu_self, tab_index)
 
     local shell = ModernMenuShell:new{
         width = Screen:getWidth(),
-        last_index = tab_index or menu_self.last_tab_index
-            or (G_reader_settings and G_reader_settings:readSetting("filemanagermenu_tab_index"))
-            or 1,
+        last_index = QuickMenuHost.initialIndex(menu_self, tab_index),
         tab_item_table = menu_self.tab_item_table,
         ui = menu_self.ui or self.ui,
         show_parent = menu_container,
@@ -520,6 +522,9 @@ function ModernMenu:showModernMenu(menu_self, tab_index)
     end
 
     menu_container[1] = shell
+    -- ScrollableContainer only crops inner repaints when this sits on the
+    -- widget passed to UIManager:show. The shell is not that window.
+    menu_container.cropping_widget = shell.scroll_container
     menu_self.menu_container = menu_container
     UIManager:show(menu_container)
     return true
