@@ -25,12 +25,13 @@ Settings.MIN_TAB_ICON_SIZE = 20
 Settings.MAX_TAB_ICON_SIZE = 40
 
 Settings.DEFAULT_OPTION_FONT_SIZE = 19
-Settings.MIN_OPTION_FONT_SIZE = 14
+Settings.MIN_OPTION_FONT_SIZE = 8
 Settings.MAX_OPTION_FONT_SIZE = 28
 
 -- Vertical padding inside each option row (unscaled logical units).
+-- Negative values tighten rows below the default minimum height.
 Settings.DEFAULT_OPTION_PADDING = 6
-Settings.MIN_OPTION_PADDING = 2
+Settings.MIN_OPTION_PADDING = -10
 Settings.MAX_OPTION_PADDING = 20
 
 --- Near-black for unselected tab chrome (COLOR_DARK_GRAY / 0x88 is too pale on phones).
@@ -167,9 +168,14 @@ function Settings.setOptionPadding(padding)
     ))
 end
 
---- Scaled vertical padding for option rows.
+--- Scaled vertical padding for option rows (preserves sign for negative values).
 function Settings.getOptionPaddingPx()
-    return Screen:scaleBySize(Settings.getOptionPadding())
+    local pad = Settings.getOptionPadding()
+    if pad == 0 then
+        return 0
+    end
+    local scaled = Screen:scaleBySize(math.abs(pad))
+    return pad < 0 and -scaled or scaled
 end
 
 --- Remove all Modern Menu preference keys so getters return defaults.

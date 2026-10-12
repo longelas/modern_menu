@@ -87,8 +87,19 @@ function MenuItemCard:init()
     local side_margin = self.side_margin or Screen:scaleBySize(28)
     self.width = self.width or Screen:getWidth()
     local option_font = Settings.getOptionFontSize()
-    local v_pad = Settings.getOptionPaddingPx()
-    local min_h = math.max(Screen:scaleBySize(44), option_font + v_pad * 2)
+    local v_pad_raw = Settings.getOptionPaddingPx()
+    -- FrameContainer padding must stay >= 0; negative settings shrink min row height.
+    local v_pad = math.max(0, v_pad_raw)
+    local base_min = Screen:scaleBySize(44)
+    local min_h
+    if v_pad_raw >= 0 then
+        min_h = math.max(base_min, option_font + v_pad * 2)
+    else
+        min_h = math.max(
+            Screen:scaleBySize(math.max(16, option_font)),
+            base_min + v_pad_raw * 2
+        )
+    end
     local enabled = item_enabled(item)
     local checked = item_checked(item)
     local submenu = has_submenu(item)
