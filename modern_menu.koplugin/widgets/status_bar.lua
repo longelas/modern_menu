@@ -67,6 +67,7 @@ end
 function StatusBar.setElsewhereEnabled(enabled)
     if G_reader_settings then
         G_reader_settings:saveSetting(SETTINGS_KEY, enabled and true or false)
+        G_reader_settings:flush()
     end
     UIManager:broadcastEvent(Event:new("ModernMenuStatusChromeChanged", enabled and true or false))
 end

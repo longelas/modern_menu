@@ -29,6 +29,7 @@ local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalScrollBar = require("ui/widget/verticalscrollbar")
+local VerticalSpan = require("ui/widget/verticalspan")
 local Screen = Device.screen
 local _ = require("gettext")
 
@@ -93,16 +94,20 @@ local ModernMenuShell = InputContainer:extend{
     cropping_widget = nil, -- required by UIManager for ScrollableContainer
 }
 
-local function chrome_button(text, callback, dirty_parent)
-    -- No padding so glyphs sit on the same side margin as list text
+local function chrome_button(text, callback, dirty_parent, width, height)
+    -- Large fixed tap target; glyph stays visually light via modest padding.
     return Button:new{
         text = text,
         bordersize = 0,
         radius = 0,
         padding = 0,
+        padding_h = Screen:scaleBySize(10),
+        padding_v = Screen:scaleBySize(8),
         margin = 0,
+        width = width,
+        height = height,
         text_font_face = "smallinfofont",
-        text_font_size = 22,
+        text_font_size = 26,
         text_font_bold = true,
         callback = callback,
         show_parent = dirty_parent,
@@ -120,7 +125,7 @@ function ModernMenuShell:init()
     self.item_table_stack = {}
     self.title_stack = {}
     self.side_margin = Screen:scaleBySize(36)
-    self.chrome_h = Screen:scaleBySize(52)
+    self.chrome_h = Screen:scaleBySize(56)
     self.last_index = self.last_index or 1
     if self.last_index < 1 then self.last_index = 1 end
     if self.last_index > #self.tab_item_table then
@@ -133,11 +138,16 @@ function ModernMenuShell:init()
     self.scrollbar_gutter = ScrollableContainer:getScrollbarWidth()
     self.list_content_w = content_w - self.scrollbar_gutter
 
-    self.back_button = chrome_button("‹", function() self:backToUpperMenu() end, dirty_parent)
-    self.close_button = chrome_button("✕", function() self:closeMenu() end, dirty_parent)
+    -- Prefer a phone-comfortable hit target over a tiny glyph-sized button.
+    local chrome_btn_w = Screen:scaleBySize(56)
+    local chrome_btn_h = Screen:scaleBySize(48)
+    self.back_button = chrome_button("‹", function() self:backToUpperMenu() end, dirty_parent, chrome_btn_w, chrome_btn_h)
+    self.close_button = chrome_button("✕", function() self:closeMenu() end, dirty_parent, chrome_btn_w, chrome_btn_h)
 
-    local chrome_btn_w = Screen:scaleBySize(40)
-    local title_w = content_w - self.side_margin * 2 - chrome_btn_w * 2
+    -- Keep title between the enlarged chrome buttons; small outer pad so back
+    -- sits near the left edge for easier reach.
+    local chrome_edge_pad = Screen:scaleBySize(8)
+    local title_w = content_w - chrome_edge_pad * 2 - chrome_btn_w * 2
 
     self.breadcrumb = Breadcrumb:new{
         crumbs = {},
@@ -150,28 +160,29 @@ function ModernMenuShell:init()
 
     self.header = FrameContainer:new{
         bordersize = 0,
-        padding_top = Screen:scaleBySize(8),
-        padding_bottom = Screen:scaleBySize(4),
-        padding_left = self.side_margin,
-        padding_right = self.side_margin,
+        padding_top = Screen:scaleBySize(6),
+        -- Extra bottom margin so the title row reads as its own band.
+        padding_bottom = Screen:scaleBySize(14),
+        padding_left = chrome_edge_pad,
+        padding_right = chrome_edge_pad,
         margin = 0,
         background = Blitbuffer.COLOR_WHITE,
         width = content_w,
         HorizontalGroup:new{
             align = "center",
             LeftContainer:new{
-                dimen = Geom:new{ w = chrome_btn_w, h = Screen:scaleBySize(40) },
+                dimen = Geom:new{ w = chrome_btn_w, h = chrome_btn_h },
                 self.back_button,
             },
             CenterContainer:new{
                 dimen = Geom:new{
                     w = title_w,
-                    h = Screen:scaleBySize(40),
+                    h = chrome_btn_h,
                 },
                 self.breadcrumb,
             },
             RightContainer:new{
-                dimen = Geom:new{ w = chrome_btn_w, h = Screen:scaleBySize(40) },
+                dimen = Geom:new{ w = chrome_btn_w, h = chrome_btn_h },
                 self.close_button,
             },
         },
@@ -182,22 +193,30 @@ function ModernMenuShell:init()
         tabs = self.tab_defs,
         selected = self.last_index,
         width = content_w,
-        height = Screen:scaleBySize(58),
+        -- Same inset as the grey rule so tabs sit in the content box.
+        side_margin = self.side_margin,
         show_parent = dirty_parent,
         on_change = function(_, index)
             self:switchMenuTab(index)
         end,
     }
 
-    self.tab_rule = HorizontalGroup:new{
-        HorizontalSpan:new{ width = self.side_margin },
-        LineWidget:new{
-            background = Blitbuffer.COLOR_GRAY,
-            dimen = Geom:new{
-                w = content_w - 2 * self.side_margin,
-                h = Size.line.thin,
+    -- Slightly heavier, darker rule with breathing room — clear without shouting.
+    local rule_w = content_w - 2 * self.side_margin
+    self.tab_rule = VerticalGroup:new{
+        align = "left",
+        VerticalSpan:new{ width = Screen:scaleBySize(4) },
+        HorizontalGroup:new{
+            HorizontalSpan:new{ width = self.side_margin },
+            LineWidget:new{
+                background = Blitbuffer.COLOR_GRAY_5,
+                dimen = Geom:new{
+                    w = rule_w,
+                    h = math.max(Size.line.thick, Screen:scaleBySize(2)),
+                },
             },
         },
+        VerticalSpan:new{ width = Screen:scaleBySize(8) },
     }
 
     self.status_bar = StatusBar.make{
@@ -212,11 +231,12 @@ function ModernMenuShell:init()
     self.status_h = self.status_bar.height
 
     -- Fixed list viewport under chrome; scroll when items overflow
-    local header_h = Screen:scaleBySize(52)
-    local tabs_h = Screen:scaleBySize(60)
+    local header_h = chrome_btn_h + Screen:scaleBySize(20)
+    local tabs_h = self.tab_bar.height + Screen:scaleBySize(4)
+    local rule_h = Screen:scaleBySize(4) + math.max(Size.line.thick, Screen:scaleBySize(2)) + Screen:scaleBySize(8)
     local list_h = math.max(
         Screen:scaleBySize(120),
-        self.dimen.h - self.status_h - header_h - tabs_h - Screen:scaleBySize(8)
+        self.dimen.h - self.status_h - header_h - tabs_h - rule_h - Screen:scaleBySize(4)
     )
     self.list_dimen = Geom:new{
         w = content_w,
@@ -288,8 +308,10 @@ function ModernMenuShell:init()
         },
     }
 
-    local chrome_zone = self.side_margin + chrome_btn_w
+    -- Generous corner hit zones (wider than the visible button) for thumbs.
+    local chrome_zone = chrome_edge_pad + chrome_btn_w + Screen:scaleBySize(12)
     local chrome_top = self.status_h or 0
+    self.chrome_h = header_h
     local chrome_dimen = Geom:new{
         x = 0, y = chrome_top,
         w = self.dimen.w,
@@ -326,6 +348,7 @@ function ModernMenuShell:init()
         return false
     end
 
+    -- chrome_hit first so the enlarged corner zones win over the glyph button.
     self[1] = OverlapGroup:new{
         dimen = self.dimen,
         allow_mirroring = false,
@@ -478,6 +501,17 @@ function ModernMenuShell:_rebuildContent()
 end
 
 function ModernMenuShell:refresh()
+    -- Tab chrome caches sizes at init; reload so tab font/icon settings
+    -- refresh instantly the same way option rows do.
+    if self.tab_bar and self.tab_bar.reloadFromSettings then
+        local old_h = self.tab_bar.height
+        self.tab_bar:reloadFromSettings()
+        local delta = self.tab_bar.height - old_h
+        if delta ~= 0 and self.list_dimen and self.scroll_container then
+            self.list_dimen.h = math.max(Screen:scaleBySize(120), self.list_dimen.h - delta)
+            self.scroll_container.dimen.h = self.list_dimen.h
+        end
+    end
     self:_rebuildContent()
     UIManager:setDirty(self:_dirtyTarget(), "ui")
 end

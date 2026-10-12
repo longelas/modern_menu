@@ -13,6 +13,7 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local TextWidget = require("ui/widget/textwidget")
 local Device = require("device")
 local Screen = Device.screen
+local Settings = require("settings")
 
 local Breadcrumb = InputContainer:extend{
     crumbs = nil, -- { "Library", "Settings", ... }
@@ -57,9 +58,9 @@ function Breadcrumb:_rebuild()
         local is_last = (i == n)
         local label = TextWidget:new{
             text = tostring(name),
-            face = Font:getFace("xx_smallinfofont", is_last and 15 or 14),
+            face = Font:getFace("xx_smallinfofont", is_last and 16 or 15),
             bold = is_last,
-            fgcolor = is_last and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_DARK_GRAY,
+            fgcolor = is_last and Blitbuffer.COLOR_BLACK or Settings.UNSELECTED_FG,
             max_width = math.floor(max_total / math.max(n, 1)),
         }
         table.insert(row, label)
@@ -70,8 +71,8 @@ function Breadcrumb:_rebuild()
         if not is_last then
             table.insert(row, TextWidget:new{
                 text = sep,
-                face = Font:getFace("xx_smallinfofont", 14),
-                fgcolor = Blitbuffer.COLOR_GRAY,
+                face = Font:getFace("xx_smallinfofont", 15),
+                fgcolor = Settings.UNSELECTED_FG,
             })
         end
     end

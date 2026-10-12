@@ -20,9 +20,11 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local UIManager = require("ui/uimanager")
 local logger = require("logger")
 local _ = require("gettext")
+local T = require("ffi/util").template
 local Screen = Device.screen
 
 local ModernMenuShell = require("ui/menu_shell")
+local Settings = require("settings")
 local StatusBar = require("widgets/status_bar")
 
 local ModernMenu = InputContainer:extend{
@@ -52,9 +54,12 @@ function ModernMenu:init()
     self:onDispatcherRegisterActions()
     self.use_stock_menu = G_reader_settings and G_reader_settings:isTrue("modern_menu_use_stock") or false
 
+    self:_registerMainMenu()
+
     local function boot()
         self:installMenuHook()
         self:installStatusChrome()
+        self:_registerMainMenu()
     end
 
     -- FileManager: postInit runs after setupLayout (title bar exists).
@@ -66,6 +71,181 @@ function ModernMenu:init()
     end
 end
 
+function ModernMenu:addToMainMenu(menu_items)
+    menu_items.modern_menu = {
+        text = _("Modern Menu"),
+        sorting_hint = "more_tools",
+        sub_item_table = {
+            {
+                text_func = function()
+                    return T(_("Tab label size: %1"), Settings.getTabFontSize())
+                end,
+                enabled_func = function()
+                    return not Settings.getTabIconsOnly()
+                end,
+                keep_menu_open = true,
+                callback = function(touchmenu_instance)
+                    local SpinWidget = require("ui/widget/spinwidget")
+                    UIManager:show(SpinWidget:new{
+                        title_text = _("Tab label size"),
+                        info_text = _("Font size for tab titles in the menu header."),
+                        value = Settings.getTabFontSize(),
+                        value_min = Settings.MIN_TAB_FONT_SIZE,
+                        value_max = Settings.MAX_TAB_FONT_SIZE,
+                        default_value = Settings.DEFAULT_TAB_FONT_SIZE,
+                        value_step = 1,
+                        value_hold_step = 2,
+                        ok_text = _("Set"),
+                        callback = function(spin)
+                            if not spin then return end
+                            Settings.setTabFontSize(spin.value)
+                            if touchmenu_instance then
+                                touchmenu_instance:updateItems()
+                            end
+                        end,
+                    })
+                end,
+            },
+            {
+                text = _("Icons only (hide tab labels)"),
+                checked_func = function()
+                    return Settings.getTabIconsOnly()
+                end,
+                keep_menu_open = true,
+                callback = function(touchmenu_instance)
+                    Settings.setTabIconsOnly(not Settings.getTabIconsOnly())
+                    -- Prefer a larger icon when switching to icons-only if still on the
+                    -- label-mode default, so phones get usable targets immediately.
+                    if Settings.getTabIconsOnly() then
+                        local current = Settings.getTabIconSize()
+                        if current <= Settings.DEFAULT_TAB_ICON_SIZE then
+                            Settings.setTabIconSize(Settings.DEFAULT_TAB_ICON_SIZE_ICONS_ONLY)
+                        end
+                    end
+                    if touchmenu_instance then
+                        touchmenu_instance:updateItems()
+                    end
+                end,
+            },
+            {
+                text_func = function()
+                    return T(_("Tab icon size: %1"), Settings.getTabIconSize())
+                end,
+                keep_menu_open = true,
+                callback = function(touchmenu_instance)
+                    local SpinWidget = require("ui/widget/spinwidget")
+                    UIManager:show(SpinWidget:new{
+                        title_text = _("Tab icon size"),
+                        info_text = _("Size of appbar icons in the menu header."),
+                        value = Settings.getTabIconSize(),
+                        value_min = Settings.MIN_TAB_ICON_SIZE,
+                        value_max = Settings.MAX_TAB_ICON_SIZE,
+                        default_value = Settings.getTabIconsOnly()
+                            and Settings.DEFAULT_TAB_ICON_SIZE_ICONS_ONLY
+                            or Settings.DEFAULT_TAB_ICON_SIZE,
+                        value_step = 1,
+                        value_hold_step = 2,
+                        ok_text = _("Set"),
+                        callback = function(spin)
+                            if not spin then return end
+                            Settings.setTabIconSize(spin.value)
+                            if touchmenu_instance then
+                                touchmenu_instance:updateItems()
+                            end
+                        end,
+                    })
+                end,
+            },
+            {
+                text_func = function()
+                    return T(_("Option font size: %1"), Settings.getOptionFontSize())
+                end,
+                keep_menu_open = true,
+                callback = function(touchmenu_instance)
+                    local SpinWidget = require("ui/widget/spinwidget")
+                    UIManager:show(SpinWidget:new{
+                        title_text = _("Option font size"),
+                        info_text = _("Font size for menu option rows."),
+                        value = Settings.getOptionFontSize(),
+                        value_min = Settings.MIN_OPTION_FONT_SIZE,
+                        value_max = Settings.MAX_OPTION_FONT_SIZE,
+                        default_value = Settings.DEFAULT_OPTION_FONT_SIZE,
+                        value_step = 1,
+                        value_hold_step = 2,
+                        ok_text = _("Set"),
+                        callback = function(spin)
+                            if not spin then return end
+                            Settings.setOptionFontSize(spin.value)
+                            if touchmenu_instance then
+                                touchmenu_instance:updateItems()
+                            end
+                        end,
+                    })
+                end,
+            },
+            {
+                text_func = function()
+                    return T(_("Option padding: %1"), Settings.getOptionPadding())
+                end,
+                keep_menu_open = true,
+                callback = function(touchmenu_instance)
+                    local SpinWidget = require("ui/widget/spinwidget")
+                    UIManager:show(SpinWidget:new{
+                        title_text = _("Option padding"),
+                        info_text = _("Vertical padding inside each menu option row."),
+                        value = Settings.getOptionPadding(),
+                        value_min = Settings.MIN_OPTION_PADDING,
+                        value_max = Settings.MAX_OPTION_PADDING,
+                        default_value = Settings.DEFAULT_OPTION_PADDING,
+                        value_step = 1,
+                        value_hold_step = 2,
+                        ok_text = _("Set"),
+                        callback = function(spin)
+                            if not spin then return end
+                            Settings.setOptionPadding(spin.value)
+                            if touchmenu_instance then
+                                touchmenu_instance:updateItems()
+                            end
+                        end,
+                    })
+                end,
+            },
+            {
+                text = _("Reset to defaults"),
+                keep_menu_open = true,
+                callback = function(touchmenu_instance)
+                    local ConfirmBox = require("ui/widget/confirmbox")
+                    UIManager:show(ConfirmBox:new{
+                        text = _("Reset all Modern Menu settings to their defaults?"),
+                        ok_text = _("Reset"),
+                        ok_callback = function()
+                            Settings.resetToDefaults()
+                            if touchmenu_instance then
+                                touchmenu_instance:updateItems()
+                            end
+                            local InfoMessage = require("ui/widget/infomessage")
+                            UIManager:show(InfoMessage:new{
+                                text = _("Modern Menu defaults restored"),
+                                timeout = 2,
+                            })
+                        end,
+                    })
+                end,
+            },
+            {
+                text = _("Use stock KOReader menu"),
+                checked_func = function()
+                    return self.use_stock_menu
+                end,
+                keep_menu_open = true,
+                callback = function()
+                    self:onToggleStockMenu()
+                end,
+            },
+        },
+    }
+end
+
 function ModernMenu:_installPackagePath()
     local dir = self.path or plugin_dir
     if not dir then return end
@@ -73,6 +253,17 @@ function ModernMenu:_installPackagePath()
     local needle = dir .. "?.lua"
     if not package.path:find(needle, 1, true) then
         package.path = dir .. "?.lua;" .. dir .. "?/init.lua;" .. package.path
+    end
+end
+
+function ModernMenu:_registerMainMenu()
+    if self._main_menu_registered then
+        return
+    end
+    local menu = self.ui and self.ui.menu
+    if menu and menu.registerToMainMenu then
+        menu:registerToMainMenu(self)
+        self._main_menu_registered = true
     end
 end
 
@@ -332,6 +523,7 @@ function ModernMenu:onToggleStockMenu()
     self.use_stock_menu = not self.use_stock_menu
     if G_reader_settings then
         G_reader_settings:saveSetting("modern_menu_use_stock", self.use_stock_menu)
+        G_reader_settings:flush()
     end
     local InfoMessage = require("ui/widget/infomessage")
     UIManager:show(InfoMessage:new{

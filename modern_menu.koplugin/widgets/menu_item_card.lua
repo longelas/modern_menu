@@ -23,6 +23,7 @@ local Device = require("device")
 local Screen = Device.screen
 
 local ToggleSwitch = require("widgets/toggle_switch")
+local Settings = require("settings")
 
 -- Subtle e-ink zebra stripe (0xEE); pairs with COLOR_WHITE
 local STRIPE_GRAY = Blitbuffer.COLOR_GRAY_E
@@ -85,7 +86,9 @@ function MenuItemCard:init()
     local item = self.item or {}
     local side_margin = self.side_margin or Screen:scaleBySize(28)
     self.width = self.width or Screen:getWidth()
-    local min_h = Screen:scaleBySize(44)
+    local option_font = Settings.getOptionFontSize()
+    local v_pad = Settings.getOptionPaddingPx()
+    local min_h = math.max(Screen:scaleBySize(44), option_font + v_pad * 2)
     local enabled = item_enabled(item)
     local checked = item_checked(item)
     local submenu = has_submenu(item)
@@ -97,7 +100,7 @@ function MenuItemCard:init()
     local trailing_w = Screen:scaleBySize(56)
     local row_w = inner_w - content_pad * 2
 
-    local icon_size = Screen:scaleBySize(22)
+    local icon_size = Screen:scaleBySize(math.max(18, math.floor(option_font * 1.1)))
     local icon_slot = 0
     local leading = HorizontalGroup:new{ align = "center" }
     if item.icon and item.icon ~= "" then
@@ -118,7 +121,7 @@ function MenuItemCard:init()
 
     local title = TextWidget:new{
         text = text,
-        face = Font:getFace("smallinfofont", 19),
+        face = Font:getFace("smallinfofont", option_font),
         fgcolor = fg,
         max_width = row_w - trailing_w - icon_slot - Screen:scaleBySize(8),
     }
@@ -128,14 +131,14 @@ function MenuItemCard:init()
     if submenu then
         trailing = TextWidget:new{
             text = "›",
-            face = Font:getFace("cfont", 24),
+            face = Font:getFace("cfont", math.max(20, option_font + 4)),
             fgcolor = Blitbuffer.COLOR_DARK_GRAY,
         }
     elseif checked ~= nil then
         if item.radio then
             trailing = TextWidget:new{
                 text = checked and "◉" or "○",
-                face = Font:getFace("smallinfofont", 18),
+                face = Font:getFace("smallinfofont", math.max(16, option_font - 1)),
                 fgcolor = Blitbuffer.COLOR_DARK_GRAY,
             }
         else
@@ -171,8 +174,8 @@ function MenuItemCard:init()
     -- Stripe fills only the content column (side margins stay white)
     local body = FrameContainer:new{
         bordersize = 0,
-        padding_top = Screen:scaleBySize(6),
-        padding_bottom = Screen:scaleBySize(6),
+        padding_top = v_pad,
+        padding_bottom = v_pad,
         padding_left = content_pad,
         padding_right = content_pad,
         margin = 0,

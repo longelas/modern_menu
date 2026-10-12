@@ -1,5 +1,6 @@
 --[[--
-Tab bar with stock KOReader appbar icons + short labels, active underline.
+Tab bar with stock KOReader appbar icons + short labels.
+Equal columns inside an inset box matching the grey rule / content margins.
 @module modern_menu.ui.tab_bar
 --]]
 
@@ -9,35 +10,72 @@ local Font = require("ui/font")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
+local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconWidget = require("ui/widget/iconwidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
-local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
-local UnderlineContainer = require("ui/widget/container/underlinecontainer")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Device = require("device")
 local Screen = Device.screen
 
+local Settings = require("settings")
+
 local TabBar = InputContainer:extend{
     tabs = nil,
     selected = 1,
-    width = nil,
+    width = nil, -- full outer width (screen / panel)
     height = nil,
+    side_margin = nil, -- inset to match grey rule / content box
     on_change = nil,
     show_parent = nil,
+    face_size = nil,
+    icon_size = nil,
+    icons_only = nil,
 }
+
+function TabBar:_applyLayoutMetrics()
+    local pad = Screen:scaleBySize(12)
+    local gap = self.icons_only and 0 or Screen:scaleBySize(2)
+    local label_h = self.icons_only and 0 or (self.face_size + Screen:scaleBySize(4))
+    self.height = math.max(Screen:scaleBySize(48), self.icon_size + gap + label_h + pad)
+    self.inner_width = math.max(0, self.width - 2 * self.side_margin)
+    if self.dimen then
+        self.dimen.w = self.width
+        self.dimen.h = self.height
+    end
+end
+
+--- Re-read Settings and rebuild so SpinWidget changes apply immediately.
+function TabBar:reloadFromSettings()
+    self.icons_only = Settings.getTabIconsOnly()
+    self.face_size = Settings.getTabFontSize()
+    self.icon_size = Settings.getTabIconPx()
+    self:_applyLayoutMetrics()
+    self:_rebuildTabs()
+end
 
 function TabBar:init()
     self.tabs = self.tabs or {}
     self.width = self.width or Screen:getWidth()
-    self.height = self.height or Screen:scaleBySize(56)
-    self.face_size = (#self.tabs > 5) and 11 or 12
-    self.icon_size = Screen:scaleBySize((#self.tabs > 5) and 22 or 24)
+    self.side_margin = self.side_margin or 0
+    self.icons_only = self.icons_only
+    if self.icons_only == nil then
+        self.icons_only = Settings.getTabIconsOnly()
+    end
+    self.face_size = self.face_size or Settings.getTabFontSize()
+    self.icon_size = self.icon_size or Settings.getTabIconPx()
+
+    self:_applyLayoutMetrics()
 
     self.row = HorizontalGroup:new{ align = "center" }
-    self[1] = self.row
+    self[1] = HorizontalGroup:new{
+        align = "center",
+        HorizontalSpan:new{ width = self.side_margin },
+        self.row,
+        HorizontalSpan:new{ width = self.side_margin },
+    }
     self.dimen = Geom:new{ w = self.width, h = self.height }
     self:_rebuildTabs()
 
@@ -59,7 +97,11 @@ function TabBar:_rebuildTabs()
     end
 
     local count = math.max(#self.tabs, 1)
-    local tab_w = math.floor(self.width / count)
+    -- Even columns fill the inset box — comfortable gaps without edge overflow.
+    local tab_w = math.floor(self.inner_width / count)
+    local label_max = math.max(Screen:scaleBySize(12), tab_w - Screen:scaleBySize(8))
+    local icon_px = math.min(self.icon_size, math.max(Screen:scaleBySize(16), tab_w - Screen:scaleBySize(8)))
+    local unselected_fg = Settings.UNSELECTED_FG
 
     for i, tab in ipairs(self.tabs) do
         local selected = (i == self.selected)
@@ -69,43 +111,37 @@ function TabBar:_rebuildTabs()
             local ok, icon = pcall(function()
                 return IconWidget:new{
                     icon = tab.icon,
-                    width = self.icon_size,
-                    height = self.icon_size,
+                    width = icon_px,
+                    height = icon_px,
                     alpha = true,
-                    dim = not selected,
+                    dim = false,
                 }
             end)
             if ok and icon then
                 table.insert(parts, icon)
-                table.insert(parts, VerticalSpan:new{ width = Screen:scaleBySize(2) })
+                if not self.icons_only then
+                    table.insert(parts, VerticalSpan:new{ width = Screen:scaleBySize(2) })
+                end
             end
         end
 
-        table.insert(parts, TextWidget:new{
-            text = tab.title,
-            face = Font:getFace("xx_smallinfofont", self.face_size),
-            bold = selected,
-            fgcolor = selected and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_DARK_GRAY,
-            max_width = tab_w - Screen:scaleBySize(4),
-        })
-
-        -- Underline only the icon+label (not the full tab cell) so edge tabs
-        -- don't draw a black bar to the screen edge.
-        local labeled = parts
-        if selected then
-            labeled = UnderlineContainer:new{
-                linesize = Size.line.thick,
-                padding = Size.padding.tiny,
-                color = Blitbuffer.COLOR_BLACK,
-                parts,
-            }
+        if not self.icons_only then
+            table.insert(parts, TextWidget:new{
+                text = tab.title,
+                face = Font:getFace("xx_smallinfofont", self.face_size),
+                bold = selected,
+                fgcolor = selected and Blitbuffer.COLOR_BLACK or unselected_fg,
+                max_width = label_max,
+                truncate_with_ellipsis = true,
+            })
         end
+
         table.insert(self.row, CenterContainer:new{
             dimen = Geom:new{
                 w = tab_w,
                 h = self.height,
             },
-            labeled,
+            parts,
         })
     end
 end
@@ -127,8 +163,11 @@ function TabBar:onTapSelect(_, ges)
         return false
     end
     local count = math.max(#self.tabs, 1)
-    local tab_w = math.floor(self.width / count)
-    local rel_x = ges.pos.x - self.dimen.x
+    local tab_w = math.floor(self.inner_width / count)
+    local rel_x = ges.pos.x - self.dimen.x - self.side_margin
+    if rel_x < 0 or rel_x >= self.inner_width then
+        return false
+    end
     local index = math.floor(rel_x / tab_w) + 1
     if index < 1 then index = 1 end
     if index > #self.tabs then index = #self.tabs end
