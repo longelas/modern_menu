@@ -513,8 +513,16 @@ function ModernMenuShell:_rebuildContent()
         table.insert(self.qm_footer_slot, pinned)
     end
     if footer_widget and self.qm_footer_slot then
+        local footer_size = footer_widget:getSize()
+        local footer_box = CenterContainer:new{
+            dimen = Geom:new{
+                w = self.list_content_w or self.dimen.w,
+                h = footer_size and footer_size.h or 0,
+            },
+            footer_widget,
+        }
         table.insert(self.qm_footer_slot, VerticalSpan:new{ width = Size.span.vertical_default })
-        table.insert(self.qm_footer_slot, footer_widget)
+        table.insert(self.qm_footer_slot, footer_box)
     end
 
     local footer_h = 0

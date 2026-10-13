@@ -458,6 +458,8 @@ end
 -- The scroller asks us for height. A CenterContainer reports the dimen we
 -- gave it; measure the panel inside so a later layout change is included.
 -- A bare group (the pinned slider block) is measured as a whole.
+-- Width stays at the centering box. Shrinking it to the panel's own width
+-- zeroes the centering offset and the grid paints against the left edge.
 function GestureLayer:getSize()
     local child = self[1]
     local size
@@ -467,10 +469,8 @@ function GestureLayer:getSize()
         size = child:getSize()
     end
     if size and size.h and size.h > 0 and self.dimen then
-        self.dimen.w = size.w or self.dimen.w
         self.dimen.h = size.h
         if child.dimen then
-            child.dimen.w = self.dimen.w
             child.dimen.h = size.h
         end
     end
@@ -501,11 +501,19 @@ function GestureLayer:onQuickMenuMultiSwipe(_, ges)
     return QuickMenuHost.dispatch(self.shell, "multiswipe", ges)
 end
 
+-- Tabs and menu rows are inset by side_margin. The quick panel uses
+-- item_width as its painted width, so that has to be the same column.
+local function panel_column(shell)
+    local full = (shell and (shell.list_content_w or (shell.dimen and shell.dimen.w)))
+        or Screen:getWidth()
+    local inset = (shell and shell.side_margin) or 0
+    return math.max(Screen:scaleBySize(120), full - inset * 2)
+end
+
 local function make_shim(shell, tab)
     local shim = {
         show_parent = shell.show_parent or shell,
         dimen = shell.dimen,
-        width = shell.list_content_w or shell.dimen.w,
         padding = Size.padding.default,
         bordersize = 0,
         item_table = tab,
@@ -513,10 +521,9 @@ local function make_shim(shell, tab)
         page_num = 1,
         fface = Font:getFace("ffont"),
     }
-    shim.item_width = math.max(
-        Screen:scaleBySize(120),
-        shim.width - shim.padding * 2
-    )
+    shim.item_width = panel_column(shell)
+    -- Stock TouchMenu: item_width = width - padding * 2. Footer uses width.
+    shim.width = shim.item_width + shim.padding * 2
 
     function shim:updateItems()
         if shell._closing then
@@ -724,8 +731,9 @@ end
 local function sync_shim(shim, shell, tab)
     shim.show_parent = shell.show_parent or shell
     shim.dimen = shell.dimen
-    shim.width = shell.list_content_w or (shell.dimen and shell.dimen.w) or shim.width
     shim.padding = shim.padding or Size.padding.default
+    shim.item_width = panel_column(shell)
+    shim.width = shim.item_width + shim.padding * 2
     -- Same stack the shell pops on Back. Neo's settings button no-ops without it.
     shim.item_table_stack = shell.item_table_stack
     local nested = shell.item_table_stack and #shell.item_table_stack > 0
@@ -738,10 +746,6 @@ local function sync_shim(shim, shell, tab)
     else
         shim.item_table = tab
     end
-    shim.item_width = math.max(
-        Screen:scaleBySize(120),
-        shim.width - shim.padding * 2
-    )
     shim.touch_menu_callback = shell.touch_menu_callback
 end
 
@@ -1247,9 +1251,17 @@ function QuickMenuHost.fill(shell)
         if panel_widget and tab.id == "neo_quicksettings" then
             local blocks = detach_slider_blocks(panel_widget, shim._qs_refs or shim._qm_refs)
             if blocks then
+                local content_w = shell.list_content_w or shell.dimen.w
+                local block_size = blocks:getSize()
                 shell._qm_pinned_sliders = GestureLayer:new{
                     shell = shell,
-                    blocks,
+                    CenterContainer:new{
+                        dimen = Geom:new{
+                            w = content_w,
+                            h = block_size and block_size.h or 0,
+                        },
+                        blocks,
+                    },
                 }
             end
         end
