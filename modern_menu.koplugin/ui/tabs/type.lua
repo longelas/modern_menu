@@ -41,7 +41,7 @@ function TypeTab:build(parent)
     if not doc then
         table.insert(content, TextWidget:new{
             text = _("Open a document to adjust typography."),
-            face = Font:getFace("smallinfofont", 18),
+            face = require("settings").face(18),
             max_width = width,
         })
         return content

@@ -56,14 +56,14 @@ function SystemTab:build(parent)
 
     table.insert(content, TextWidget:new{
         text = battery_text(),
-        face = Font:getFace("smallinfofont", 20),
+        face = require("settings").face(20),
         bold = true,
         max_width = width,
     })
     table.insert(content, VerticalSpan:new{ width = Size.span.vertical_small })
     table.insert(content, TextWidget:new{
         text = storage_text(),
-        face = Font:getFace("smallinfofont", 18),
+        face = require("settings").face(18),
         max_width = width,
     })
     table.insert(content, VerticalSpan:new{ width = Size.span.vertical_large })

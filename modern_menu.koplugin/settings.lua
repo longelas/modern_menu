@@ -5,6 +5,7 @@ Persisted Modern Menu preferences (G_reader_settings).
 
 local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
+local Font = require("ui/font")
 local Screen = Device.screen
 
 local Settings = {}
@@ -15,6 +16,7 @@ local KEY_TAB_ICON_SIZE = "modern_menu_tab_icon_size"
 local KEY_OPTION_FONT_SIZE = "modern_menu_option_font_size"
 local KEY_OPTION_PADDING = "modern_menu_option_padding"
 local KEY_PURE_BLACK = "modern_menu_pure_black"
+local KEY_MENU_FONT = "modern_menu_font"
 
 -- Defaults tuned for phone / e-ink readability.
 Settings.DEFAULT_TAB_FONT_SIZE = 17
@@ -43,6 +45,7 @@ local ALL_KEYS = {
     KEY_OPTION_FONT_SIZE,
     KEY_OPTION_PADDING,
     KEY_PURE_BLACK,
+    KEY_MENU_FONT,
 }
 
 local function read(key, default)
@@ -176,6 +179,81 @@ function Settings.getOptionPaddingPx()
     end
     local scaled = Screen:scaleBySize(math.abs(pad))
     return pad < 0 and -scaled or scaled
+end
+
+--- Face name from KOReader's font menu. Nil means the stock UI font.
+function Settings.getMenuFont()
+    local name = read(KEY_MENU_FONT, nil)
+    if type(name) ~= "string" or name == "" then
+        return nil
+    end
+    return name
+end
+
+function Settings.setMenuFont(name)
+    Settings._font_file = nil
+    if type(name) ~= "string" or name == "" then
+        del(KEY_MENU_FONT)
+        if G_reader_settings then
+            G_reader_settings:flush()
+        end
+        return
+    end
+    write(KEY_MENU_FONT, name)
+end
+
+local function resolve_menu_font()
+    local name = Settings.getMenuFont()
+    if not name then
+        return nil, nil
+    end
+    if Settings._font_file and Settings._font_file.name == name then
+        return Settings._font_file.file, Settings._font_file.index
+    end
+    local ok, cre = pcall(function()
+        return require("document/credocument"):engineInit()
+    end)
+    if not ok or not cre or not cre.getFontFaceFilenameAndFaceIndex then
+        return nil, nil
+    end
+    local file, index = cre.getFontFaceFilenameAndFaceIndex(name)
+    if not file then
+        file, index = cre.getFontFaceFilenameAndFaceIndex(name, nil, true)
+    end
+    Settings._font_file = { name = name, file = file, index = index }
+    return file, index
+end
+
+--- A face at `size`, using the chosen menu font when one is set.
+function Settings.face(size, fallback)
+    local file, index = resolve_menu_font()
+    if file then
+        local face = Font:getFace(file, size, index)
+        if face then
+            return face
+        end
+    end
+    return Font:getFace(fallback or "smallinfofont", size)
+end
+
+--- KOReader font-menu entries: face names and display labels.
+function Settings.fontChoices()
+    if Settings._font_choices then
+        return Settings._font_choices.faces, Settings._font_choices.labels
+    end
+    local ok_list, FontList = pcall(require, "fontlist")
+    if not ok_list or not FontList or not FontList.getFontArgFunc then
+        return {}, {}
+    end
+    local ok, faces, labels = pcall(function()
+        return FontList:getFontArgFunc()
+    end)
+    if not ok or type(faces) ~= "table" then
+        return {}, {}
+    end
+    labels = labels or faces
+    Settings._font_choices = { faces = faces, labels = labels }
+    return faces, labels
 end
 
 function Settings.getPureBlack()

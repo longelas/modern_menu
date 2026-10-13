@@ -106,8 +106,31 @@ function QuickMenuHost.sync(menu_self)
     end
 end
 
+--- Neo stores this beside KOReader settings. Missing file means the
+-- plugin default, which is to open on its tab.
+local function neo_opens_by_default()
+    local ok_ds, DataStorage = pcall(require, "datastorage")
+    local ok_ls, LuaSettings = pcall(require, "luasettings")
+    if not (ok_ds and ok_ls and DataStorage.getSettingsDir) then
+        return true
+    end
+    local ok, settings = pcall(function()
+        return LuaSettings:open(DataStorage:getSettingsDir() .. "/neo_quicksettings.lua")
+    end)
+    if not ok or not settings or not settings.readSetting then
+        return true
+    end
+    local cfg = settings:readSetting("config")
+    if type(cfg) ~= "table" or cfg.open_by_default == nil then
+        return true
+    end
+    return cfg.open_by_default == true
+end
+
 --- Tab to open. Quick Menu's default (`open_on_start`) forces its tab,
--- which it expresses as `remember()` returning false.
+-- which it expresses as `remember()` returning false. Neo Quick Settings
+-- uses its own "show as default tab" flag and wins only when Quick Menu
+-- is not forcing its tab.
 function QuickMenuHost.initialIndex(menu_self, tab_index)
     local tabs = menu_self and menu_self.tab_item_table or {}
     for i, tab in ipairs(tabs) do
@@ -118,6 +141,18 @@ function QuickMenuHost.initialIndex(menu_self, tab_index)
             end
             break
         end
+    end
+
+    local neo_index
+    for i, tab in ipairs(tabs) do
+        if tab.id == "neo_quicksettings" then
+            neo_index = i
+            break
+        end
+    end
+    local neo_default = neo_index and neo_opens_by_default()
+    if neo_default then
+        return neo_index
     end
 
     local saved = G_reader_settings and G_reader_settings:readSetting("filemanagermenu_tab_index")
@@ -131,6 +166,11 @@ function QuickMenuHost.initialIndex(menu_self, tab_index)
     local tab = tabs[index]
     if tab and tab.id == "exit_tab" then
         index = math.max(1, index - 1)
+    end
+    -- Neo inserts itself first but, when it is not the default opener,
+    -- stock TouchMenu steps past that slot.
+    if neo_index and index == neo_index and not neo_default then
+        index = neo_index < #tabs and (neo_index + 1) or math.max(1, neo_index - 1)
     end
     return index
 end
@@ -159,6 +199,70 @@ local function set_locked(touch_menu, locked)
     touch_menu._qm_slider_locked = on
 end
 
+--- Neo Quick Settings stores action buttons as plain frames plus callbacks
+-- in `_qs_refs.buttons`. TouchMenu hit-tests them. Quick Menu's own
+-- buttons are real tap widgets and are left to handle themselves.
+local function press_ref_button(touch_menu, ges, is_hold)
+    local refs = qm_refs(touch_menu)
+    local buttons = refs and refs.buttons
+    if type(buttons) ~= "table" or not ges or not ges.pos or not ges.pos.intersectWith then
+        return false
+    end
+    -- Neo hit-tests the icon circle only. The caption sits just under it, so a
+    -- tap on the label would otherwise miss. Prefer a circle hit; otherwise the
+    -- closest caption under a circle.
+    local label_h = Screen:scaleBySize(22)
+    local fallback, fallback_dist
+    for _, btn_ref in ipairs(buttons) do
+        if type(btn_ref) == "table" then
+            local widget = btn_ref.widget or btn_ref
+            local dimen = widget and widget.dimen
+            if dimen then
+                local on_circle = ges.pos:intersectWith(dimen)
+                local on_label = not on_circle and ges.pos:intersectWith(Geom:new{
+                    x = dimen.x,
+                    y = dimen.y + dimen.h,
+                    w = dimen.w,
+                    h = label_h,
+                })
+                if on_circle or on_label then
+                    local function fire(ref)
+                        local callback = is_hold and ref.hold_callback or ref.callback
+                        if callback then
+                            local ok, err = pcall(callback, touch_menu)
+                            if not ok then
+                                logger.warn("modern_menu: quick panel button failed: " .. tostring(err))
+                            end
+                        end
+                        return true
+                    end
+                    if on_circle then
+                        return fire(btn_ref)
+                    end
+                    local cx = dimen.x + dimen.w / 2
+                    local cy = dimen.y + dimen.h + label_h / 2
+                    local dist = (ges.pos.x - cx) ^ 2 + (ges.pos.y - cy) ^ 2
+                    if not fallback or dist < fallback_dist then
+                        fallback = btn_ref
+                        fallback_dist = dist
+                    end
+                end
+            end
+        end
+    end
+    if not fallback then
+        return false
+    end
+    local callback = is_hold and fallback.hold_callback or fallback.callback
+    if callback then
+        local ok, err = pcall(callback, touch_menu)
+        if not ok then
+            logger.warn("modern_menu: quick panel button failed: " .. tostring(err))
+        end
+    end
+    return true
+end
+
 local function slider_list(touch_menu)
     local refs = qm_refs(touch_menu)
     local sliders = {}
@@ -183,24 +287,69 @@ end
 -- should consume the event (slider handled it, or it must not scroll).
 function QuickMenuHost.dispatch(shell, kind, ges)
     local touch_menu = shell and shell._qm_touch
-    if not touch_menu or not qm_refs(touch_menu) or not in_scroll_area(shell, ges) then
+    if not touch_menu or not qm_refs(touch_menu) then
         return false
+    end
+    local in_area = in_scroll_area(shell, ges)
+    -- Both plugins paint the track straight onto Screen.bb while _dragging,
+    -- then refresh with setDirty(nil). On a phone that refresh already holds
+    -- the framebuffer mutex, so the paint crashes. Move the value with
+    -- _dragging left off and let the menu repaint normally.
+    local function move_slider(slider, abs_x)
+        if not slider or type(slider.applyPosition) ~= "function" or not abs_x then
+            return false
+        end
+        slider._dragging = false
+        slider.hide_knob = false
+        local ok, err = pcall(slider.applyPosition, slider, abs_x)
+        if not ok then
+            logger.warn("modern_menu: slider update failed: " .. tostring(err))
+            return false
+        end
+        UIManager:setDirty(shell.show_parent or "all", "ui")
+        return true
+    end
+    local function slider_at(pos)
+        if not pos or not pos.intersectWith then
+            return nil
+        end
+        for _, slider in ipairs(slider_list(touch_menu)) do
+            if slider.dimen and pos:intersectWith(slider.dimen) then
+                return slider
+            end
+        end
+        return nil
     end
 
     if kind == "pan" then
+        local dir = ges and ges.direction
         if qm_locked(touch_menu) then
             touch_menu._qm_opening_pan = true
             touch_menu._qs_opening_pan = true
+            shell._qm_slider_drag = nil
+            if not in_area then
+                return false
+            end
+            -- The opening tap must not move a slider. A vertical drag still
+            -- scrolls so the button grid can move.
+            if dir == "north" or dir == "south" then
+                return false
+            end
             return true
         end
         touch_menu._qm_opening_pan = false
         touch_menu._qs_opening_pan = false
-        for _, slider in ipairs(slider_list(touch_menu)) do
-            if slider.handlePan and slider:handlePan(ges) then
-                return true
-            end
+        local active = shell._qm_slider_drag
+        if not active and ges and ges.pos then
+            active = slider_at(ges.pos)
         end
-        local dir = ges.direction
+        if active and ges and ges.pos then
+            shell._qm_slider_drag = active
+            return move_slider(active, ges.pos.x)
+        end
+        if not in_area then
+            return false
+        end
         if dir == "east" or dir == "west" then
             return true
         end
@@ -208,48 +357,62 @@ function QuickMenuHost.dispatch(shell, kind, ges)
     end
 
     if kind == "pan_release" then
+        local active = shell._qm_slider_drag
+        shell._qm_slider_drag = nil
         if qm_locked(touch_menu) or touch_menu._qm_opening_pan or touch_menu._qs_opening_pan then
             touch_menu._qm_opening_pan = false
             touch_menu._qs_opening_pan = false
-            return true
+            return in_area
         end
-        for _, slider in ipairs(slider_list(touch_menu)) do
-            if slider.handlePanRelease and slider:handlePanRelease(ges, shell.show_parent, shell.dimen) then
-                return true
-            end
+        if active and ges and ges.pos then
+            return move_slider(active, ges.pos.x)
         end
         return false
     end
 
     if kind == "tap" or kind == "hold" then
         if qm_locked(touch_menu) then
-            return true
+            return in_area
         end
-        local method = kind == "tap" and "handleTap" or "handleHold"
-        for _, slider in ipairs(slider_list(touch_menu)) do
-            if slider[method] and slider[method](slider, ges) then
-                return true
+        if kind == "tap" then
+            for _, slider in ipairs(slider_list(touch_menu)) do
+                if slider.handleTap and slider:handleTap(ges) then
+                    return true
+                end
             end
+        end
+        -- Button frames are in screen space, so a stale scroll dimen must not
+        -- hide a tap that landed on one.
+        if press_ref_button(touch_menu, ges, kind == "hold") then
+            return true
         end
         return false
     end
 
     if kind == "swipe" then
         if qm_locked(touch_menu) then
-            return true
+            return in_area
         end
-        for _, slider in ipairs(slider_list(touch_menu)) do
-            if slider.handleSwipe and slider:handleSwipe(ges, shell.show_parent, shell.dimen) then
-                return true
-            end
+        local dir = ges and ges.direction
+        local sign = 0
+        if dir == "east" or dir == "northeast" or dir == "southeast" then
+            sign = 1
+        elseif dir == "west" or dir == "northwest" or dir == "southwest" then
+            sign = -1
         end
-        local dir = ges.direction
-        local scrollable = shell.scroll_container and shell.scroll_container._is_scrollable
-        if (dir == "north" or dir == "south") and scrollable then
+        local active = shell._qm_slider_drag
+        shell._qm_slider_drag = nil
+        if not active and ges and ges.pos then
+            active = slider_at(ges.pos)
+        end
+        if active and sign ~= 0 and ges and ges.pos then
+            return move_slider(active, ges.pos.x + sign * (ges.distance or 0))
+        end
+        if not in_area then
             return false
         end
-        if dir == "north" then
-            shell:closeMenu()
+        if dir == "north" or dir == "south" then
+            return false
         end
         return true
     end
@@ -290,6 +453,28 @@ function GestureLayer:init()
         QuickMenuSwipe = { GestureRange:new{ ges = "swipe", range = range } },
         QuickMenuMultiSwipe = { GestureRange:new{ ges = "multiswipe", range = range } },
     }
+end
+
+-- The scroller asks us for height. A CenterContainer reports the dimen we
+-- gave it; measure the panel inside so a later layout change is included.
+-- A bare group (the pinned slider block) is measured as a whole.
+function GestureLayer:getSize()
+    local child = self[1]
+    local size
+    if child and child.dimen and child[1] and child[1].getSize then
+        size = child[1]:getSize()
+    elseif child and child.getSize then
+        size = child:getSize()
+    end
+    if size and size.h and size.h > 0 and self.dimen then
+        self.dimen.w = size.w or self.dimen.w
+        self.dimen.h = size.h
+        if child.dimen then
+            child.dimen.w = self.dimen.w
+            child.dimen.h = size.h
+        end
+    end
+    return self.dimen
 end
 
 function GestureLayer:onQuickMenuTap(_, ges)
@@ -336,6 +521,18 @@ local function make_shim(shell, tab)
     function shim:updateItems()
         if shell._closing then
             return
+        end
+        -- Settings (and any other submenu) assigns this shim's item_table,
+        -- then asks for a refresh. The shell is what paints that list.
+        if self.item_table and shell.item_table ~= self.item_table then
+            shell.item_table = self.item_table
+        end
+        local stack = shell.item_table_stack
+        local titles = shell.title_stack
+        if stack and titles then
+            while #titles < #stack do
+                titles[#titles + 1] = _("Settings")
+            end
         end
         -- Plugin writes `_qs_full_refresh`. A nested toggle during rebuild
         -- must not be dropped or the button keeps the previous snapshot.
@@ -529,12 +726,369 @@ local function sync_shim(shim, shell, tab)
     shim.dimen = shell.dimen
     shim.width = shell.list_content_w or (shell.dimen and shell.dimen.w) or shim.width
     shim.padding = shim.padding or Size.padding.default
-    shim.item_table = tab
+    -- Same stack the shell pops on Back. Neo's settings button no-ops without it.
+    shim.item_table_stack = shell.item_table_stack
+    local nested = shell.item_table_stack and #shell.item_table_stack > 0
+    if nested then
+        -- Card navigation writes the shell. A button callback writes the shim
+        -- first; updateItems copies that onto the shell before we get here.
+        if shell.item_table then
+            shim.item_table = shell.item_table
+        end
+    else
+        shim.item_table = tab
+    end
     shim.item_width = math.max(
         Screen:scaleBySize(120),
         shim.width - shim.padding * 2
     )
     shim.touch_menu_callback = shell.touch_menu_callback
+end
+
+-- Neo asks IconWidget for names like "quick_wifi" and "quick_connections_new".
+-- Those files live under icons/Dark_icons/ (often without the _new suffix), so
+-- the name lookup misses and the circle is drawn empty.
+local icons_ready = false
+local function publish_plugin_icons(panel_fn)
+    if icons_ready or type(panel_fn) ~= "function" or not debug or not debug.getinfo then
+        return
+    end
+    local ok_info, info = pcall(debug.getinfo, panel_fn, "S")
+    if not ok_info or not info or type(info.source) ~= "string" then
+        return
+    end
+    local src = info.source
+    if src:sub(1, 1) == "@" then
+        src = src:sub(2)
+    end
+    local root = src:match("^(.*)/[^/]+$")
+    if not root then
+        return
+    end
+    local ok_lfs, lfs = pcall(require, "libs/libkoreader-lfs")
+    if not ok_lfs or not lfs then
+        return
+    end
+    local icons_dir = root .. "/icons/"
+    if lfs.attributes(icons_dir, "mode") ~= "directory" then
+        return
+    end
+    local iw = require("ui/widget/iconwidget")
+    local init_fn = rawget(iw, "init") or iw.init
+    if type(init_fn) ~= "function" or not debug.getupvalue then
+        return
+    end
+    local icons_path, icons_dirs
+    for i = 1, 64 do
+        local uname, uval = debug.getupvalue(init_fn, i)
+        if not uname then
+            break
+        end
+        if uname == "ICONS_PATH" and type(uval) == "table" then
+            icons_path = uval
+        elseif uname == "ICONS_DIRS" and type(uval) == "table" then
+            icons_dirs = uval
+        end
+    end
+    if not icons_path then
+        return
+    end
+    local function stock_has(name)
+        if not icons_dirs then
+            return false
+        end
+        for _, dir in ipairs(icons_dirs) do
+            for _, ext in ipairs({ ".svg", ".png" }) do
+                if lfs.attributes(dir .. "/" .. name .. ext, "mode") == "file" then
+                    return true
+                end
+            end
+        end
+        return false
+    end
+    local found = {}
+    local function scan(dir, depth)
+        for file in lfs.dir(dir) do
+            if file ~= "." and file ~= ".." then
+                local path = dir .. file
+                local mode = lfs.attributes(path, "mode")
+                if mode == "file" then
+                    local name = file:match("^(.+)%.[^.]+$")
+                    if name and not found[name] then
+                        found[name] = path
+                    end
+                elseif mode == "directory" and depth < 2 then
+                    scan(path .. "/", depth + 1)
+                end
+            end
+        end
+    end
+    local ok_scan, err = pcall(scan, icons_dir, 0)
+    if not ok_scan then
+        logger.warn("modern_menu: icon index failed: " .. tostring(err))
+        return
+    end
+    for name, path in pairs(found) do
+        if not icons_path[name] and not stock_has(name) then
+            icons_path[name] = path
+        end
+    end
+    -- Button defs ask for quick_connections_new while the file is quick_connections.
+    for name, path in pairs(found) do
+        if not name:match("_new$") then
+            local newer = name .. "_new"
+            if not found[newer] and not icons_path[newer] and not stock_has(newer) then
+                icons_path[newer] = path
+            end
+        end
+    end
+    icons_ready = true
+end
+
+local function tree_has_method(widget, method, seen)
+    if type(widget) ~= "table" or seen[widget] then
+        return false
+    end
+    seen[widget] = true
+    if type(widget[method]) == "function" then
+        return true
+    end
+    for i = 1, #widget do
+        if tree_has_method(widget[i], method, seen) then
+            return true
+        end
+    end
+    return false
+end
+
+local function any_window_handles(method)
+    local stack = UIManager._window_stack
+    if not stack then
+        return false
+    end
+    local seen = {}
+    for i = 1, #stack do
+        local entry = stack[i]
+        local widget = entry and (entry.widget or entry)
+        if tree_has_method(widget, method, seen) then
+            return true
+        end
+    end
+    return false
+end
+
+local function is_sort_widget(widget)
+    return type(widget) == "table"
+        and type(widget.moveItem) == "function"
+        and type(widget._populateItems) == "function"
+        and type(widget.item_table) == "table"
+        and widget.main_content ~= nil
+end
+
+local function sort_item_at(widget, pos)
+    local content = widget.main_content
+    if not content or not pos or not pos.intersectWith then
+        return nil
+    end
+    for _, child in ipairs(content) do
+        if child.index and child.dimen and pos:intersectWith(child.dimen) then
+            return child.index
+        end
+    end
+    return nil
+end
+
+local function patch_sort_rows(widget)
+    local content = widget.main_content
+    if not content then
+        return
+    end
+    for _, child in ipairs(content) do
+        if child.index then
+            -- Stock rows only highlight on tap. Hold starts a drag.
+            child.onHoldTouch = function(row)
+                widget.marked = row.index
+                widget._mm_dragging = true
+                widget:_populateItems()
+                return true
+            end
+        end
+    end
+end
+
+-- Neo's exit and restart buttons open a swipe-to-confirm dialog. A phone
+-- flick is often a swipe, and that dialog only listened for a slow pan, so
+-- the knob never moved. A horizontal swipe now drives the same track.
+local function is_slide_confirm(widget)
+    return type(widget) == "table"
+        and widget.track
+        and type(widget.onPan) == "function"
+        and widget.on_confirm
+end
+
+local function arm_slide_confirm(widget)
+    widget._mm_slide = true
+    widget.modal = true
+    local range = Geom:new{
+        x = 0, y = 0,
+        w = Screen:getWidth(),
+        h = Screen:getHeight(),
+    }
+    widget.ges_events = widget.ges_events or {}
+    widget.ges_events.Swipe = {
+        GestureRange:new{ ges = "swipe", range = range },
+    }
+    function widget:onSwipe(_, ges)
+        local track = self.track
+        if not track or not ges or not ges.pos then
+            return true
+        end
+        local dir = ges.direction
+        local sign = 0
+        if dir == "east" or dir == "northeast" or dir == "southeast" then
+            sign = 1
+        elseif dir == "west" or dir == "northwest" or dir == "southwest" then
+            sign = -1
+        end
+        if sign ~= 0 then
+            local end_x = ges.pos.x + sign * (ges.distance or 0)
+            local end_ges = { pos = { x = end_x, y = ges.pos.y }, direction = dir }
+            if track.onPan then
+                track:onPan(nil, end_ges)
+            end
+            if track.onPanRelease then
+                track:onPanRelease(nil, end_ges)
+            end
+        end
+        return true
+    end
+end
+
+local function raise_window(widget)
+    local stack = UIManager._window_stack
+    if not stack then
+        return
+    end
+    for i = #stack, 1, -1 do
+        if stack[i].widget == widget then
+            if i < #stack then
+                local window = table.remove(stack, i)
+                stack[#stack + 1] = window
+            end
+            return
+        end
+    end
+end
+
+-- Neo labels this "Drag & Drop" and opens KOReader's SortWidget. That widget
+-- is not modal, so it was inserted under this menu and never saw the drag.
+-- Hold a row, then drag it to a new slot. Tap still selects; the arrows still move.
+local function install_sort_drag()
+    if UIManager._mm_sort_show then
+        return
+    end
+    local orig_show = UIManager.show
+    UIManager._mm_sort_show = orig_show
+    function UIManager:show(widget, ...)
+        if is_slide_confirm(widget) and not widget._mm_slide then
+            arm_slide_confirm(widget)
+        end
+        if is_sort_widget(widget) and not widget._mm_drag then
+            widget._mm_drag = true
+            widget.modal = true
+            local range = widget.dimen or Geom:new{
+                x = 0, y = 0,
+                w = Screen:getWidth(),
+                h = Screen:getHeight(),
+            }
+            widget.ges_events = widget.ges_events or {}
+            widget.ges_events.ModernSortPan = {
+                GestureRange:new{ ges = "hold_pan", range = range },
+            }
+            widget.ges_events.ModernSortRelease = {
+                GestureRange:new{ ges = "hold_release", range = range },
+            }
+            function widget:onModernSortPan(_, ges)
+                if not self._mm_dragging or not ges or not ges.pos then
+                    return false
+                end
+                local idx = sort_item_at(self, ges.pos)
+                if idx and idx ~= self.marked then
+                    self:moveItem(idx - self.marked)
+                end
+                return true
+            end
+            function widget:onModernSortRelease()
+                self._mm_dragging = false
+                return true
+            end
+            local orig_populate = widget._populateItems
+            function widget:_populateItems(...)
+                orig_populate(self, ...)
+                patch_sort_rows(self)
+            end
+            patch_sort_rows(widget)
+        end
+        local shown = orig_show(self, widget, ...)
+        if is_slide_confirm(widget) then
+            raise_window(widget)
+            UIManager:setDirty(widget, "ui")
+        end
+        return shown
+    end
+end
+
+-- KOReader's SSH plugin handles ToggleSSHServer. Neo broadcasts ToggleSshServer.
+-- FileBrowser+ uses the name Neo already sends; if that plugin is not loaded the
+-- tap would otherwise do nothing.
+local function install_event_aliases()
+    if UIManager._mm_neo_broadcast then
+        return
+    end
+    local orig = UIManager.broadcastEvent
+    UIManager._mm_neo_broadcast = orig
+    local alias = {
+        ToggleSshServer = "ToggleSSHServer",
+    }
+    local missing = {
+        ToggleSshServer = {
+            methods = { "onToggleSshServer", "onToggleSSHServer" },
+            text = _("SSH plugin is not installed."),
+        },
+        ToggleFilebrowserPlusServer = {
+            methods = { "onToggleFilebrowserPlusServer" },
+            text = _("FileBrowser+ plugin is not installed."),
+        },
+    }
+    function UIManager:broadcastEvent(event)
+        local handled = orig(self, event)
+        local name = event and event.handler and event.handler:sub(3)
+        local alt = name and alias[name]
+        if alt then
+            local extra = Event:new(alt)
+            extra.args = event.args
+            if orig(self, extra) then
+                handled = true
+            end
+        end
+        local note = name and missing[name]
+        if note then
+            local present = false
+            for _, method in ipairs(note.methods) do
+                if any_window_handles(method) then
+                    present = true
+                    break
+                end
+            end
+            if not present then
+                UIManager:show(InfoMessage:new{
+                    text = note.text,
+                    timeout = 2,
+                })
+            end
+        end
+        return handled
+    end
 end
 
 local function build_panel(tab, shim)
@@ -567,18 +1121,83 @@ local function build_footer(plugin, shim)
     return shim.footer
 end
 
+local function widget_contains(root, target, seen)
+    if root == target then
+        return true
+    end
+    if type(root) ~= "table" then
+        return false
+    end
+    seen = seen or {}
+    if seen[root] then
+        return false
+    end
+    seen[root] = true
+    for _, child in ipairs(root) do
+        if widget_contains(child, target, seen) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Neo appends brightness and warmth under the button rows. Pull those
+-- blocks out so the shell can pin them under the list instead of cropping
+-- them. A favorite-group frame replaces them, and then this is a no-op.
+local function detach_slider_blocks(panel, refs)
+    local sliders = refs and refs.sliders
+    if not panel or not sliders or #sliders == 0 then
+        return nil
+    end
+    local keep, blocks = {}, {}
+    for _, child in ipairs(panel) do
+        local holds = false
+        for _, entry in ipairs(sliders) do
+            local slider = type(entry) == "table" and (entry.slider or entry) or nil
+            if slider and widget_contains(child, slider) then
+                holds = true
+                break
+            end
+        end
+        if holds then
+            blocks[#blocks + 1] = child
+        else
+            keep[#keep + 1] = child
+        end
+    end
+    if #blocks == 0 then
+        return nil
+    end
+    for i = #panel, 1, -1 do
+        panel[i] = nil
+    end
+    for i, child in ipairs(keep) do
+        panel[i] = child
+    end
+    if panel.resetLayout then
+        panel:resetLayout()
+    end
+    local group = VerticalGroup:new{ align = "center" }
+    for _, block in ipairs(blocks) do
+        table.insert(group, block)
+    end
+    return group
+end
+
 --- Build the Quick Menu body for the current tab.
 -- @return widget|nil, footer|nil, err|nil
 function QuickMenuHost.fill(shell)
+    shell._qm_pinned_sliders = nil
     local tab = shell.tab_item_table and shell.tab_item_table[shell.last_index]
     local nested = shell.item_table_stack and #shell.item_table_stack > 0
     local show_panel = tab and tab.panel ~= nil and not nested
+    local quick_tab = tab and tab.id == "quick_menu_tab"
     local plugin = QuickMenuHost.findPlugin(shell.ui, tab)
     local footer_cfg = plugin and plugin.config and plugin.config.sections and plugin.config.sections.footer
     local show_footer = false
-    if footer_cfg and (show_panel or footer_cfg.show_all_tab) then
+    if footer_cfg and (quick_tab or footer_cfg.show_all_tab) then
         show_footer = true
-    elseif show_panel then
+    elseif quick_tab then
         show_footer = true
     end
     if not show_panel and not show_footer then
@@ -591,9 +1210,10 @@ function QuickMenuHost.fill(shell)
     local shim = shell._qm_touch
     if not shim or type(shim.updateItems) ~= "function" then
         shim = make_shim(shell, tab)
-    else
-        sync_shim(shim, shell, tab)
     end
+    -- The first build used to skip this. Neo's settings button checks
+    -- item_table_stack and does nothing until a later tab switch synced it.
+    sync_shim(shim, shell, tab)
     plugin = bind_plugin(shell, tab, shim) or plugin
     shell._qm_touch = shim
     -- Stock TouchMenu sets this before the footer build. Without it the
@@ -615,9 +1235,23 @@ function QuickMenuHost.fill(shell)
 
     local panel_widget, panel_err
     if show_panel then
+        if tab.id == "neo_quicksettings" then
+            install_event_aliases()
+            install_sort_drag()
+            publish_plugin_icons(tab.panel)
+        end
         panel_widget, panel_err = build_panel(tab, shim)
         if panel_err then
             logger.warn("modern_menu: quickmenu panel failed: " .. tostring(panel_err))
+        end
+        if panel_widget and tab.id == "neo_quicksettings" then
+            local blocks = detach_slider_blocks(panel_widget, shim._qs_refs or shim._qm_refs)
+            if blocks then
+                shell._qm_pinned_sliders = GestureLayer:new{
+                    shell = shell,
+                    blocks,
+                }
+            end
         end
     end
 

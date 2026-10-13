@@ -5,7 +5,6 @@ Parents are tappable to jump back; current crumb is bold.
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local Font = require("ui/font")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
@@ -58,7 +57,7 @@ function Breadcrumb:_rebuild()
         local is_last = (i == n)
         local label = TextWidget:new{
             text = tostring(name),
-            face = Font:getFace("xx_smallinfofont", is_last and 16 or 15),
+            face = Settings.face(is_last and 16 or 15, "xx_smallinfofont"),
             bold = is_last,
             fgcolor = is_last and Blitbuffer.COLOR_BLACK or Settings.getMutedFg(),
             max_width = math.floor(max_total / math.max(n, 1)),
@@ -71,7 +70,7 @@ function Breadcrumb:_rebuild()
         if not is_last then
             table.insert(row, TextWidget:new{
                 text = sep,
-                face = Font:getFace("xx_smallinfofont", 15),
+                face = Settings.face(15, "xx_smallinfofont"),
                 fgcolor = Settings.getMutedFg(),
             })
         end

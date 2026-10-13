@@ -11,7 +11,6 @@ local Button = require("ui/widget/button")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local Event = require("ui/event")
-local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
@@ -66,6 +65,7 @@ local ID_TITLES = {
     plus_menu = _("New"),
     quick_menu_tab = _("Quick menu"),
     exit_tab = _("Exit"),
+    neo_quicksettings = _("Neo Quick"),
 }
 
 local ID_TAB_LABELS = {
@@ -80,6 +80,7 @@ local ID_TAB_LABELS = {
     plus_menu = _("New"),
     quick_menu_tab = _("Quick"),
     exit_tab = _("Exit"),
+    neo_quicksettings = _("Neo"),
 }
 
 local ModernMenuShell = InputContainer:extend{
@@ -147,6 +148,7 @@ function ModernMenuShell:init()
     local chrome_btn_h = Screen:scaleBySize(48)
     self.back_button = chrome_button("‹", function() self:backToUpperMenu() end, dirty_parent, chrome_btn_w, chrome_btn_h)
     self.close_button = chrome_button("✕", function() self:closeMenu() end, dirty_parent, chrome_btn_w, chrome_btn_h)
+    self:_applyChromeFont()
 
     -- Keep title between the enlarged chrome buttons; small outer pad so back
     -- sits near the left edge for easier reach.
@@ -206,6 +208,9 @@ function ModernMenuShell:init()
         -- Quick Menu opens its settings from a hold on the tab icon.
         on_hold = function(_, index)
             local tab = self.tab_item_table[index]
+            if tab and tab.id == "exit_tab" then
+                return self:_holdExitTab()
+            end
             if not tab or type(tab.hold_callback) ~= "function" then
                 return false
             end
@@ -481,7 +486,7 @@ function ModernMenuShell:_emptyNotice(text)
         background = Blitbuffer.COLOR_WHITE,
         TextWidget:new{
             text = text,
-            face = Font:getFace("smallinfofont", 18),
+            face = Settings.face(18),
             fgcolor = Settings.getMutedFg(),
         },
     }
@@ -500,13 +505,20 @@ function ModernMenuShell:_rebuildContent()
         panel_widget, footer_widget, panel_err = nil, nil, err_qm
     end
 
+    -- Brightness and warmth sit under the button grid in Neo's panel. This
+    -- shell's list is shorter than stock TouchMenu, so those rows were
+    -- cropped away. They are lifted out and pinned under the scroller.
+    local pinned = panel_widget and self._qm_pinned_sliders
+    if pinned and self.qm_footer_slot then
+        table.insert(self.qm_footer_slot, pinned)
+    end
     if footer_widget and self.qm_footer_slot then
         table.insert(self.qm_footer_slot, VerticalSpan:new{ width = Size.span.vertical_default })
         table.insert(self.qm_footer_slot, footer_widget)
     end
 
     local footer_h = 0
-    if self.qm_footer_slot and footer_widget then
+    if self.qm_footer_slot and (footer_widget or pinned) then
         local slot_size = self.qm_footer_slot:getSize()
         footer_h = slot_size and slot_size.h or 0
     end
@@ -589,6 +601,20 @@ function ModernMenuShell:refreshQuickMenu()
     UIManager:setDirty(self:_dirtyTarget(), "ui")
 end
 
+function ModernMenuShell:_applyChromeFont()
+    local function apply(button)
+        local label = button and button.label_widget
+        if not label then
+            return
+        end
+        label.face = Settings.face(button.text_font_size, "smallinfofont")
+        label._face_adjusted = nil
+        label:free()
+    end
+    apply(self.back_button)
+    apply(self.close_button)
+end
+
 function ModernMenuShell:refresh()
     -- Tab chrome caches sizes at init; reload so tab font/icon settings
     -- refresh instantly the same way option rows do.
@@ -602,6 +628,10 @@ function ModernMenuShell:refresh()
     end
     if self.tab_rule_line then
         self.tab_rule_line.background = Settings.getRuleFg()
+    end
+    self:_applyChromeFont()
+    if self.status_bar and self.status_bar.refresh then
+        self.status_bar:refresh()
     end
     self:_rebuildContent()
     UIManager:setDirty(self:_dirtyTarget(), "ui")
@@ -639,12 +669,84 @@ function ModernMenuShell:updateItems()
     self:refresh()
 end
 
+--- Leave the open book and land in the file browser.
+-- Quick Menu's exit-tab callback closes over whichever menu first created
+-- the tab, so from the reader it often no-ops. This uses the menu that is
+-- actually open.
+function ModernMenuShell:_goToFileManager()
+    local ui = self.ui
+    if not (ui and ui.document and ui.onClose and ui.showFileManager) then
+        self:closeMenu()
+        return
+    end
+    local file = ui.document.file
+    if self._closing then
+        return
+    end
+    self._closing = true
+    local cb = self.close_callback
+    self.close_callback = nil
+    UIManager:nextTick(function()
+        if cb then
+            pcall(cb)
+        end
+        pcall(function()
+            ui:onClose()
+            if file then
+                ui:showFileManager(file)
+            end
+        end)
+        UIManager:setDirty("all", "ui")
+    end)
+end
+
+function ModernMenuShell:_holdExitTab()
+    local ConfirmBox = require("ui/widget/confirmbox")
+    local ui = self.ui
+    local in_reader = ui and ui.document and ui.showFileManager
+    local file = in_reader and ui.document.file
+    self:closeMenu()
+    if in_reader then
+        UIManager:show(ConfirmBox:new{
+            text = _("Are you sure you want to exit book ?"),
+            ok_text = _("Exit"),
+            ok_callback = function()
+                ui:onClose()
+                if file then
+                    ui:showFileManager(file)
+                end
+            end,
+        })
+    else
+        UIManager:show(ConfirmBox:new{
+            text = _("Are you sure you want to exit KOReader ?"),
+            ok_text = _("Exit"),
+            ok_callback = function()
+                UIManager:broadcastEvent(Event:new("Exit"))
+            end,
+        })
+    end
+    return true
+end
+
 function ModernMenuShell:switchMenuTab(tab_num)
     if self.touch_menu_callback then
         self.touch_menu_callback()
     end
     local tab = self.tab_item_table[tab_num]
     if not tab then return end
+
+    -- Exit tab (and the file-browser tab it replaces) must use this menu.
+    -- A tap in the reader leaves the book for the file browser.
+    -- A tap in the file browser just dismisses the menu; hold quits KOReader.
+    if tab.id == "exit_tab" or tab.id == "filemanager" then
+        if tab.id == "exit_tab" and not (self.ui and self.ui.document) then
+            self:closeMenu()
+        else
+            self:_goToFileManager()
+        end
+        return
+    end
 
     -- Action tabs (e.g. Files → leave reader): run callback and stop.
     -- remember=false means the tab is not a browsable menu page.
@@ -711,12 +813,15 @@ function ModernMenuShell:onMenuSelect(item)
     local callback = item.callback_func and item.callback_func() or item.callback
     if callback then
         -- Pass our shell as touchmenu_instance (closeMenu / updateItems)
+        local stack_n = UIManager._window_stack and #UIManager._window_stack or 0
         callback(self)
+        local opened_dialog = UIManager._window_stack
+            and #UIManager._window_stack > stack_n
         if item.checked or item.checked_func then
             if not (item.check_callback_updates_menu or item.check_callback_closes_menu) then
                 self:updateItems()
             end
-        elseif not item.keep_menu_open then
+        elseif not opened_dialog and not item.keep_menu_open then
             self:closeMenu()
         end
     end

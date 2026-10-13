@@ -39,13 +39,13 @@ function Slider:init()
 
     self.value_widget = TextWidget:new{
         text = tostring(self.value),
-        face = Font:getFace("smallinfofont", 18),
+        face = require("settings").face(18),
         bold = true,
     }
 
     self.title_widget = TextWidget:new{
         text = self.title,
-        face = Font:getFace("smallinfofont", 18),
+        face = require("settings").face(18),
         max_width = self.width - Screen:scaleBySize(64),
     }
 
@@ -53,7 +53,7 @@ function Slider:init()
         self.title_widget,
         TextWidget:new{
             text = "  ",
-            face = Font:getFace("smallinfofont", 18),
+            face = require("settings").face(18),
         },
         self.value_widget,
     }

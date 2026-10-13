@@ -51,13 +51,13 @@ function Overlay:init()
 
     self.title_widget = TextWidget:new{
         text = _("Quick Settings"),
-        face = Font:getFace("infofont", 22),
+        face = require("settings").face(22, "infofont"),
         bold = true,
     }
 
     self.close_label = TextWidget:new{
         text = _("Close"),
-        face = Font:getFace("smallinfofont", 18),
+        face = require("settings").face(18),
         bold = true,
     }
 

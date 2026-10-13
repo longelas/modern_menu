@@ -6,7 +6,6 @@ Equal columns inside an inset box matching the grey rule / content margins.
 
 local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
-local Font = require("ui/font")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
@@ -138,7 +137,7 @@ function TabBar:_rebuildTabs()
         if not self.icons_only or not showed_icon then
             table.insert(parts, TextWidget:new{
                 text = tab.title,
-                face = Font:getFace("xx_smallinfofont", self.face_size),
+                face = Settings.face(self.face_size, "xx_smallinfofont"),
                 bold = selected,
                 fgcolor = selected and Blitbuffer.COLOR_BLACK or unselected_fg,
                 max_width = label_max,
@@ -172,6 +171,14 @@ function TabBar:onTapSelect(_, ges)
     local index = self:_indexAt(ges)
     if not index then
         return false
+    end
+    -- Tapping the already highlighted tab still has to run. The exit tab
+    -- stays highlighted when its action does not switch pages.
+    if index == self.selected then
+        if self.on_change then
+            self.on_change(self.tabs[index].id, index)
+        end
+        return true
     end
     self:setSelected(index)
     return true

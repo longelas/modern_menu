@@ -5,7 +5,6 @@ Category groups alternate white / light gray (zebra striping).
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
@@ -71,6 +70,16 @@ local function item_enabled(item)
     return true
 end
 
+local function row_face(item, size)
+    if item and item.font_func then
+        local ok, face = pcall(item.font_func, size)
+        if ok and face then
+            return face
+        end
+    end
+    return Settings.face(size)
+end
+
 local function item_checked(item)
     if item.checked_func then
         local ok, checked = pcall(item.checked_func)
@@ -129,7 +138,7 @@ function MenuItemCard:init()
 
     local title = TextWidget:new{
         text = text,
-        face = Font:getFace("smallinfofont", option_font),
+        face = row_face(item, option_font),
         fgcolor = fg,
         max_width = row_w - trailing_w - icon_slot - Screen:scaleBySize(8),
     }
@@ -139,14 +148,14 @@ function MenuItemCard:init()
     if submenu then
         trailing = TextWidget:new{
             text = "›",
-            face = Font:getFace("cfont", math.max(20, option_font + 4)),
+            face = Settings.face(math.max(20, option_font + 4), "cfont"),
             fgcolor = Settings.getMutedFg(),
         }
     elseif checked ~= nil then
         if item.radio then
             trailing = TextWidget:new{
                 text = checked and "◉" or "○",
-                face = Font:getFace("smallinfofont", math.max(16, option_font - 1)),
+                face = Settings.face(math.max(16, option_font - 1)),
                 fgcolor = Settings.getMutedFg(),
             }
         else
@@ -155,7 +164,7 @@ function MenuItemCard:init()
     else
         trailing = TextWidget:new{
             text = "",
-            face = Font:getFace("smallinfofont", 16),
+            face = Settings.face(16),
         }
     end
 

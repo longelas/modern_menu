@@ -8,7 +8,6 @@ local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local Event = require("ui/event")
-local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
@@ -23,6 +22,7 @@ local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local Screen = Device.screen
+local Settings = require("settings")
 
 local NetworkMgr = require("ui/network/manager")
 local ToggleSwitch = require("widgets/toggle_switch")
@@ -167,7 +167,7 @@ function StatusBar:_makeIconButton(icon_file, id)
     else
         icon = TextWidget:new{
             text = "·",
-            face = Font:getFace("smallinfofont", 16),
+            face = Settings.face(16),
         }
     end
     local pad = Screen:scaleBySize(2)
@@ -191,15 +191,15 @@ function StatusBar:_rebuild()
 
     local time_w = TextWidget:new{
         text = os.date("%H:%M"),
-        face = Font:getFace("xx_smallinfofont", 14),
+        face = Settings.face(14, "xx_smallinfofont"),
         fgcolor = Blitbuffer.COLOR_BLACK,
         bold = true,
     }
 
     local battery_w = TextWidget:new{
         text = self:_batteryText(),
-        face = Font:getFace("xx_smallinfofont", 13),
-        fgcolor = require("settings").getMutedFg(),
+        face = Settings.face(13, "xx_smallinfofont"),
+        fgcolor = Settings.getMutedFg(),
     }
     local battery_btn = FrameContainer:new{
         bordersize = 0,

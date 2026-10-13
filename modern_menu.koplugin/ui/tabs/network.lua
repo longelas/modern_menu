@@ -63,7 +63,7 @@ function NetworkTab:build(parent)
 
     table.insert(content, TextWidget:new{
         text = status_text,
-        face = Font:getFace("smallinfofont", 18),
+        face = require("settings").face(18),
         max_width = width,
     })
     table.insert(content, VerticalSpan:new{ width = Size.span.vertical_default })

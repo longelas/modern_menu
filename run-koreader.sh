@@ -4,18 +4,18 @@
 # when running the stock AppImage directly.
 #
 # Points ~/.config/koreader/plugins/ at this repo's Modern Menu and at the
-# local quickmenu.koplugin checkout so both load together.
+# local quickmenu / Neo Quick Settings checkouts so they can be tested together.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXTRACTED="${ROOT}/squashfs-root"
 APPRUN="${EXTRACTED}/AppRun"
 PLUGIN_DIR="${HOME}/.config/koreader/plugins"
-# modern_menu is required; quickmenu is the optional local download used to
-# test the two plugins side by side.
+# modern_menu is required. The other two are optional local downloads.
 PLUGINS=(
   modern_menu.koplugin
   quickmenu.koplugin
+  neo_quicksetting.koplugin
 )
 
 if [[ ! -x "${APPRUN}" ]]; then
@@ -27,6 +27,10 @@ fi
 mkdir -p "${PLUGIN_DIR}"
 for name in "${PLUGINS[@]}"; do
   src="${ROOT}/${name}"
+  # Neo Quick Settings is cloned as a repo whose plugin lives one level down.
+  if [[ ! -f "${src}/_meta.lua" && -f "${src}/plugins/${name}/_meta.lua" ]]; then
+    src="${src}/plugins/${name}"
+  fi
   dst="${PLUGIN_DIR}/${name}"
   if [[ ! -d "${src}" ]]; then
     if [[ "${name}" == "modern_menu.koplugin" ]]; then

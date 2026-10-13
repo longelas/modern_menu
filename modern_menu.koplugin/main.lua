@@ -72,11 +72,89 @@ function ModernMenu:init()
     end
 end
 
+local function menu_font_items()
+    local Font = require("ui/font")
+    local cre
+    local ok_cre, engine = pcall(function()
+        return require("document/credocument"):engineInit()
+    end)
+    if ok_cre then
+        cre = engine
+    end
+    local function file_for(name)
+        if not cre or not cre.getFontFaceFilenameAndFaceIndex then
+            return nil, nil
+        end
+        local file, index = cre.getFontFaceFilenameAndFaceIndex(name)
+        if not file then
+            file, index = cre.getFontFaceFilenameAndFaceIndex(name, nil, true)
+        end
+        return file, index
+    end
+    local items = {
+        {
+            text = _("KOReader default"),
+            radio = true,
+            keep_menu_open = true,
+            checked_func = function()
+                return Settings.getMenuFont() == nil
+            end,
+            callback = function(touchmenu_instance)
+                Settings.setMenuFont(nil)
+                if touchmenu_instance then
+                    touchmenu_instance:updateItems()
+                end
+            end,
+        },
+    }
+    local faces, labels = Settings.fontChoices()
+    for i, face_name in ipairs(faces) do
+        local file, index = file_for(face_name)
+        items[#items + 1] = {
+            text = labels[i] or face_name,
+            radio = true,
+            keep_menu_open = true,
+            checked_func = function()
+                return Settings.getMenuFont() == face_name
+            end,
+            -- Draw the row in the font it names, the same way KOReader's font menu does.
+            font_func = function(size)
+                if file then
+                    return Font:getFace(file, size, index)
+                end
+            end,
+            callback = function(touchmenu_instance)
+                Settings.setMenuFont(face_name)
+                if touchmenu_instance then
+                    touchmenu_instance:updateItems()
+                end
+            end,
+        }
+    end
+    if #faces == 0 then
+        items[#items + 1] = {
+            text = _("No additional fonts found"),
+            enabled = false,
+        }
+    end
+    return items
+end
+
 function ModernMenu:addToMainMenu(menu_items)
     menu_items.modern_menu = {
         text = _("Modern Menu"),
         sorting_hint = "more_tools",
         sub_item_table = {
+            {
+                text_func = function()
+                    local name = Settings.getMenuFont()
+                    if not name then
+                        return _("Menu font: KOReader default")
+                    end
+                    return T(_("Menu font: %1"), name)
+                end,
+                sub_item_table_func = menu_font_items,
+            },
             {
                 text_func = function()
                     return T(_("Tab label size: %1"), Settings.getTabFontSize())
