@@ -130,9 +130,16 @@ modern_menu.koplugin/     ← install this folder
 
 ## Compatibility & limitations
 
+Works with these menu plugins:
+
+- [Simple UI](https://github.com/doctorhetfield-cmd/simpleui.koplugin) — its quick-settings tab is hosted here, including taps, swipes, and holds on that panel
+- [Quick Menu](https://github.com/jbreizh/quickmenu.koplugin) — hosted as a tab. It stays first, and the menu opens on it while “Always start on quick menu tab” is on (the default). Hold that tab to open Quick Menu settings
+- Neo Quick Settings (`neo_quicksetting.koplugin`, a Quick Menu fork) — hosted the same way. Its action buttons are plain frames, so this shell hit-tests them. The menu opens on that tab while “Show as default tab when menu opens” is on
+- [Shortcuts Toolbar](https://github.com/xusoo/shortcutstoolbar.koplugin) — when enabled, its reader shortcut row (back button and icons) is pinned to the bottom of this menu. The file-browser persistent bar can still sit above the file list and shares that space with this menu’s status bar. Menu-path custom shortcuts still expect stock TouchMenu; **Toggle stock KOReader menu** restores that plugin’s own home panel
+
+It does not work with Zen OS. Zen OS replaces the same menu surface.
+
 - Targets current KOReader Lua plugin APIs (`UIManager`, `TouchMenu`-compatible `closeMenu` / `updateItems`).  
-- [quickmenu.koplugin](https://github.com/jbreizh/quickmenu.koplugin) is hosted in this shell when both plugins are enabled. Its Quick Menu tab stays first, and the menu opens on that tab while Quick Menu’s “Always start on quick menu tab” setting is on (the default). Hold that tab to open Quick Menu settings.
-- Neo Quick Settings (`neo_quicksetting.koplugin`, a Quick Menu fork) is hosted the same way. Its action buttons are plain frames, so this shell hit-tests them. The menu opens on that tab while “Show as default tab when menu opens” is on.  
 - If a future KOReader release changes menu internals, update the plugin or use the stock-menu toggle.  
 - Frontlight control appears only when `Device:hasFrontlight()` is true.  
 - Battery statistics requires the stock **batterystat** plugin (ships with KOReader).

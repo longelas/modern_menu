@@ -4,8 +4,8 @@
 # when running the stock AppImage directly.
 #
 # Points ~/.config/koreader/plugins/ at this repo's Modern Menu and at the
-# local Quick Menu, Neo Quick Settings, and Simple UI checkouts so they can
-# be tested together.
+# local Quick Menu, Neo Quick Settings, Simple UI, and Shortcuts Toolbar
+# checkouts so they can be tested together.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,6 +18,7 @@ PLUGINS=(
   quickmenu.koplugin
   neo_quicksetting.koplugin
   simpleui.koplugin
+  shortcutstoolbar.koplugin
 )
 
 if [[ ! -x "${APPRUN}" ]]; then

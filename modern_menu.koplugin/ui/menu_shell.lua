@@ -34,6 +34,7 @@ local Screen = Device.screen
 local _ = require("gettext")
 
 local QuickMenuHost = require("ui/quickmenu_host")
+local ShortcutsHost = require("ui/shortcuts_host")
 local TabBar = require("ui/tab_bar")
 local Breadcrumb = require("widgets/breadcrumb")
 local MenuItemCard = require("widgets/menu_item_card")
@@ -394,6 +395,7 @@ function ModernMenuShell:init()
 
     -- Full-screen catcher under the sheet. A tap below a short menu closes it.
     -- Inside the sheet this returns false so the rows still receive the tap.
+    -- Full-screen height has no outside area, so those taps stay with the rows.
     self._sheet_h = self.dimen.h
     local dismiss_range = Geom:new{
         x = 0, y = 0,
@@ -412,7 +414,11 @@ function ModernMenuShell:init()
             },
         },
     }
-    self.dismiss_hit.onTapDismissMenu = function(_, ges)
+    -- Gesture handlers are (arg, ges). The gesture is the second argument.
+    self.dismiss_hit.onTapDismissMenu = function(_, _, ges)
+        if Settings.getMenuHeightMode() == Settings.MENU_HEIGHT_FULL then
+            return false
+        end
         local sheet = self._sheet_h or self.dimen.h
         if not ges or not ges.pos or ges.pos.y < sheet then
             return false
@@ -654,8 +660,31 @@ function ModernMenuShell:_rebuildContent()
         table.insert(self.qm_footer_slot, footer_box)
     end
 
+    -- Shortcuts Toolbar paints this row into stock TouchMenu. Pin the same
+    -- back button and icons under the reader list when that plugin is on.
+    local shortcuts_bar
+    local ok_sc, sc_result = pcall(function()
+        return ShortcutsHost.build(self)
+    end)
+    if not ok_sc then
+        logger.warn("modern_menu: shortcuts toolbar host failed: " .. tostring(sc_result))
+    else
+        shortcuts_bar = sc_result
+    end
+    if shortcuts_bar and self.qm_footer_slot then
+        table.insert(self.qm_footer_slot, LineWidget:new{
+            background = Settings.getRuleFg(),
+            dimen = Geom:new{
+                w = self.dimen.w,
+                h = math.max(Size.line.thick, Screen:scaleBySize(1)),
+            },
+        })
+        table.insert(self.qm_footer_slot, shortcuts_bar)
+        table.insert(self.qm_footer_slot, VerticalSpan:new{ width = Screen:scaleBySize(6) })
+    end
+
     local footer_h = 0
-    if self.qm_footer_slot and (footer_widget or pinned) then
+    if self.qm_footer_slot and self.qm_footer_slot[1] then
         local slot_size = self.qm_footer_slot:getSize()
         footer_h = slot_size and slot_size.h or 0
     end

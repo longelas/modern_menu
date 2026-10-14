@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.0 — 2026-10-14
+
+Shortcuts Toolbar in the reader menu, and a tap outside a short menu closes it.
+
+### Changes
+- Shortcuts Toolbar’s reader row (back button and shortcut icons) sits at the bottom of the menu when that plugin is enabled
+- A tap on the page below the menu closes it when height is fit to content or a percentage. Full-screen height stays open until you close it
+- Works with Simple UI, Quick Menu, Neo Quick Settings, and Shortcuts Toolbar. Does not work with Zen OS
+
 ## 1.5.0 — 2026-10-14
 
 Custom Neo actions, a Simple UI tab, and a menu that can be shorter than the screen.
