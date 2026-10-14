@@ -247,7 +247,6 @@ function ModernMenuShell:init()
     self.status_bar = StatusBar.make{
         ui = self.ui,
         show_parent = dirty_parent,
-        menu_shell = self, -- enables chrome toggle left of icons
         width = content_w,
         side_margin = self.side_margin,
         -- Match list right margin (scrollbar gutter)

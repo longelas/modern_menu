@@ -1,6 +1,6 @@
 --[[--
 Clara-style top status bar: time left; Wi‑Fi, brightness (if frontlight), battery %.
-In the modern menu: chrome toggle left of the icons (show bar in file browser).
+The file-browser copy is off until enabled in Modern Menu settings.
 @module modern_menu.widgets.status_bar
 --]]
 
@@ -25,7 +25,6 @@ local Screen = Device.screen
 local Settings = require("settings")
 
 local NetworkMgr = require("ui/network/manager")
-local ToggleSwitch = require("widgets/toggle_switch")
 
 local SETTINGS_KEY = "modern_menu_show_status_elsewhere"
 
@@ -33,7 +32,6 @@ local StatusBar = InputContainer:extend{
     name = "modern_status_bar",
     ui = nil,
     show_parent = nil,
-    menu_shell = nil, -- when set, show chrome toggle (menu popup only)
     width = nil,
     height = nil,
     side_margin = nil,
@@ -58,10 +56,7 @@ local function icon_path(name)
 end
 
 function StatusBar.elsewhereEnabled()
-    if not G_reader_settings then
-        return true
-    end
-    return G_reader_settings:nilOrTrue(SETTINGS_KEY)
+    return G_reader_settings and G_reader_settings:isTrue(SETTINGS_KEY) or false
 end
 
 function StatusBar.setElsewhereEnabled(enabled)
@@ -77,7 +72,6 @@ function StatusBar.make(opts)
     return StatusBar:new{
         ui = opts.ui,
         show_parent = opts.show_parent,
-        menu_shell = opts.menu_shell,
         width = opts.width or Screen:getWidth(),
         side_margin = opts.side_margin or Screen:scaleBySize(36),
         right_inset = opts.right_inset or 0,
@@ -213,27 +207,6 @@ function StatusBar:_rebuild()
     local right = HorizontalGroup:new{ align = "center" }
     self._buttons = {}
 
-    -- Menu popup only: toggle for showing this bar in the file browser
-    if self.menu_shell then
-        local toggle = ToggleSwitch:new{
-            checked = StatusBar.elsewhereEnabled(),
-            width = Screen:scaleBySize(36),
-            height = Screen:scaleBySize(20),
-        }
-        local toggle_btn = FrameContainer:new{
-            bordersize = 0,
-            padding = Screen:scaleBySize(2),
-            margin = 0,
-            background = Blitbuffer.COLOR_WHITE,
-            toggle,
-        }
-        toggle_btn._status_id = "chrome_toggle"
-        table.insert(right, toggle_btn)
-        table.insert(right, HorizontalSpan:new{ width = self.icon_gap })
-        self._buttons.chrome_toggle = toggle_btn
-        self._chrome_toggle = toggle
-    end
-
     local wifi_btn = self:_makeIconButton(self:_wifiIconName(), "wifi")
     table.insert(right, wifi_btn)
     self._buttons.wifi = wifi_btn
@@ -368,8 +341,6 @@ function StatusBar:_handleAction(id)
         self:_onBrightness()
     elseif id == "battery" then
         self:_onBattery()
-    elseif id == "chrome_toggle" then
-        self:_onChromeToggle()
     end
 end
 
@@ -402,15 +373,6 @@ function StatusBar:_onBattery()
         return
     end
     UIManager:broadcastEvent(Event:new("ShowBatteryStatistics"))
-end
-
-function StatusBar:_onChromeToggle()
-    local enabled = not StatusBar.elsewhereEnabled()
-    StatusBar.setElsewhereEnabled(enabled)
-    if self._chrome_toggle then
-        self._chrome_toggle.checked = enabled
-    end
-    UIManager:setDirty(self.show_parent or self, "ui", self.dimen)
 end
 
 ---------------------------------------------------------------------------

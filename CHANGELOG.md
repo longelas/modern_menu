@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.7.0 — 2026-10-14
+
+Shortcuts Toolbar custom actions run from this menu, and the file-browser status bar is optional.
+
+### Changes
+- Custom Shortcuts Toolbar buttons run from the reader row: system actions, menu-path actions, and a shortcut that opens a submenu
+- Choosing **Menu action** records a tap in this menu, including items inside a submenu
+- The file-browser shortcut row is present when KOReader starts in the file browser
+- **Status bar in file browser** is in **Modern Menu** settings and is off until you turn it on. The switch is no longer in the menu header
+
 ## 1.6.0 — 2026-10-14
 
 Shortcuts Toolbar in the reader menu, and a tap outside a short menu closes it.

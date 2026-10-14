@@ -193,6 +193,19 @@ function ModernMenu:addToMainMenu(menu_items)
         sorting_hint = "more_tools",
         sub_item_table = {
             {
+                text = _("Status bar in file browser"),
+                checked_func = function()
+                    return StatusBar.elsewhereEnabled()
+                end,
+                keep_menu_open = true,
+                callback = function(touchmenu_instance)
+                    StatusBar.setElsewhereEnabled(not StatusBar.elsewhereEnabled())
+                    if touchmenu_instance then
+                        touchmenu_instance:updateItems()
+                    end
+                end,
+            },
+            {
                 text_func = function()
                     local name = Settings.getMenuFont()
                     if not name then
