@@ -25,6 +25,7 @@ local Screen = Device.screen
 
 local ModernMenuShell = require("ui/menu_shell")
 local QuickMenuHost = require("ui/quickmenu_host")
+local ShortcutsHost = require("ui/shortcuts_host")
 local Settings = require("settings")
 local StatusBar = require("widgets/status_bar")
 
@@ -61,6 +62,8 @@ function ModernMenu:init()
         self:installMenuHook()
         self:installStatusChrome()
         self:_registerMainMenu()
+        ShortcutsHost.installReplayHook(self.ui)
+        ShortcutsHost.ensureFileBrowserBar(self.ui)
     end
 
     -- FileManager: postInit runs after setupLayout (title bar exists).
@@ -585,6 +588,8 @@ function ModernMenu:_hookFileManagerLayout()
         if StatusBar.elsewhereEnabled() then
             plugin:_installFileManagerStatusBar()
         end
+        -- A new file chooser drops the shortcut row the plugin inserted earlier.
+        ShortcutsHost.ensureFileBrowserBar(fm_self)
     end
 end
 
@@ -701,6 +706,7 @@ function ModernMenu:showModernMenu(menu_self, tab_index)
     -- Reader injects the Simple UI tab from onShowMenu, which this hook
     -- replaces. Make sure the tab exists before the opening index is chosen.
     QuickMenuHost.ensureSimpleUITab(menu_self)
+    ShortcutsHost.installReplayHook(menu_self.ui or self.ui)
 
     -- Match ReaderMenu: stop selection / close bottom config
     if menu_self.ui and menu_self.ui.keyselection and menu_self.ui.keyselection.stopHighlightIndicator then
@@ -726,8 +732,7 @@ function ModernMenu:showModernMenu(menu_self, tab_index)
         show_parent = menu_container,
     }
 
-    -- Match stock: close_callback closes menu_container via Reader/FM menu helpers
-    shell.close_callback = function()
+    local function finish_close()
         if menu_self.onCloseReaderMenu then
             menu_self:onCloseReaderMenu()
         elseif menu_self.onCloseFileManagerMenu then
@@ -736,6 +741,22 @@ function ModernMenu:showModernMenu(menu_self, tab_index)
             UIManager:close(menu_container)
             menu_self.menu_container = nil
         end
+    end
+
+    -- System shortcuts call close_callback(), then Dispatcher:execute.
+    -- The window has to be off the stack before that sendEvent. Full
+    -- teardown waits a tick so the icon handler can finish.
+    shell.close_callback = function()
+        if shell._closing then
+            finish_close()
+            return
+        end
+        shell._closing = true
+        shell:unlinkFromStack()
+        UIManager:nextTick(function()
+            finish_close()
+            UIManager:setDirty("all", "ui")
+        end)
     end
 
     shell.touch_menu_callback = function()

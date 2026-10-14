@@ -506,6 +506,12 @@ function ModernMenuShell:goToCrumb(index)
         self.item_table = table.remove(self.item_table_stack)
         table.remove(self.title_stack)
     end
+    local pick = self._shortcut_pick
+    if pick and pick.nav_path then
+        while #pick.nav_path > #self.title_stack do
+            table.remove(pick.nav_path)
+        end
+    end
     self:refresh()
 end
 
@@ -728,6 +734,16 @@ function ModernMenuShell:_rebuildContent()
         end
     end
 
+    if self._shortcut_pick then
+        local bars = ShortcutsHost.pickBars(self)
+        if bars then
+            local wrapped = VerticalGroup:new{ align = "left" }
+            table.insert(wrapped, content)
+            table.insert(wrapped, bars)
+            content = wrapped
+        end
+    end
+
     -- Reset scroll state so the next paint recomputes overflow + scrollbar.
     -- A live _bb would blit the previous button glyphs over the new panel.
     self.scroll_container[1] = content
@@ -780,6 +796,11 @@ function ModernMenuShell:_applyChromeFont()
 end
 
 function ModernMenuShell:refresh()
+    -- A shortcut tap closes first, then runs the action. Rebuilding here
+    -- would free that icon while its handler is still on the stack.
+    if self._closing then
+        return
+    end
     -- Tab chrome caches sizes at init; reload so tab font/icon settings
     -- refresh instantly the same way option rows do.
     if self.tab_bar and self.tab_bar.reloadFromSettings then
@@ -801,25 +822,56 @@ function ModernMenuShell:refresh()
     self:_dirtyMenu()
 end
 
+--- Drop the window now so UIManager:sendEvent can reach the book.
+-- Widget teardown stays on the caller: freeing the tree mid-tap would
+-- release the shortcut icon while its handler is still running.
+function ModernMenuShell:unlinkFromStack()
+    local parent = self.show_parent or self
+    local stack = UIManager._window_stack
+    if stack then
+        for i = #stack, 1, -1 do
+            if stack[i].widget == parent then
+                if UIManager._dirty then
+                    UIManager._dirty[parent] = nil
+                end
+                table.remove(stack, i)
+            end
+        end
+    end
+    return parent
+end
+
 function ModernMenuShell:closeMenu()
     if self._closing then
         return true
+    end
+    -- Closing mid-pick is the same as Cancel: return to the shortcut editor.
+    local cancel_pick
+    if self._shortcut_pick then
+        cancel_pick = self._shortcut_pick.on_cancel
+        self._shortcut_pick = nil
     end
     self._closing = true
 
     local cb = self.close_callback
     self.close_callback = nil
+    local parent = self:unlinkFromStack()
 
-    -- Defer so we don't tear down widgets mid-gesture dispatch.
-    -- close_callback (Reader/FM onClose*Menu) closes the CenterContainer parent.
+    -- Shortcut and menu actions call closeMenu(), then UIManager:sendEvent.
+    -- sendEvent only reaches the book while this window is no longer on top.
+    -- Stock TouchMenu removes it immediately. Freeing the widgets here would
+    -- run during the tap, so drop the window now and finish teardown next tick.
     UIManager:nextTick(function()
         if cb then
             cb()
         else
-            UIManager:close(self.show_parent or self, "ui")
+            UIManager:close(parent, "ui")
         end
         UIManager:setDirty("all", "ui")
     end)
+    if cancel_pick then
+        cancel_pick()
+    end
     return true
 end
 
@@ -899,6 +951,12 @@ function ModernMenuShell:switchMenuTab(tab_num)
     end
     local tab = self.tab_item_table[tab_num]
     if not tab then return end
+    -- Recording a shortcut should not leave the book or run a tab action.
+    local pick = self._shortcut_pick
+    if pick and (tab.id == "exit_tab" or tab.id == "filemanager"
+            or (tab.callback and tab.remember == false)) then
+        return
+    end
 
     -- Exit tab (and the file-browser tab it replaces) must use this menu.
     -- A tap in the reader leaves the book for the file browser.
@@ -921,6 +979,10 @@ function ModernMenuShell:switchMenuTab(tab_num)
         end
     end
 
+    if pick then
+        pick.tab_index = tab_num
+        pick.nav_path = {}
+    end
     self.last_index = tab_num
     self.item_table_stack = {}
     self.title_stack = {}
@@ -932,6 +994,16 @@ function ModernMenuShell:switchMenuTab(tab_num)
 end
 
 function ModernMenuShell:backToUpperMenu(no_close)
+    local pick = self._shortcut_pick
+    if pick then
+        if #self.item_table_stack > 0 then
+            if pick.nav_path and #pick.nav_path > 0 then
+                table.remove(pick.nav_path)
+            end
+        else
+            ShortcutsHost.finishPick(self, "cancel")
+        end
+    end
     if #self.item_table_stack > 0 then
         self.item_table = table.remove(self.item_table_stack)
         table.remove(self.title_stack)
@@ -945,6 +1017,11 @@ function ModernMenuShell:backToUpperMenu(no_close)
 end
 
 function ModernMenuShell:onMenuSelect(item)
+    if self._shortcut_pick and not self._shortcut_pick._entering then
+        if ShortcutsHost.onPickSelect(self, item) then
+            return true
+        end
+    end
     if self.touch_menu_callback then
         self.touch_menu_callback()
     end
@@ -993,6 +1070,9 @@ function ModernMenuShell:onMenuSelect(item)
 end
 
 function ModernMenuShell:onMenuHold(item)
+    if self._shortcut_pick then
+        return true
+    end
     if self.touch_menu_callback then
         self.touch_menu_callback()
     end
