@@ -256,6 +256,7 @@ function ModernMenuShell:init()
 
     -- Fixed list viewport under chrome; scroll when items overflow
     local header_h = chrome_btn_h + Screen:scaleBySize(20)
+    self._header_h = header_h
     local tabs_h = self.tab_bar.height + Screen:scaleBySize(4)
     local rule_h = Screen:scaleBySize(4) + math.max(Size.line.thick, Screen:scaleBySize(2)) + Screen:scaleBySize(8)
     local list_h = math.max(
@@ -319,6 +320,17 @@ function ModernMenuShell:init()
     self.cropping_widget = self.scroll_container
     -- Quick Menu footer sits under the list and is empty on other tabs.
     self.qm_footer_slot = VerticalGroup:new{ align = "center" }
+    -- Bottom edge of a short sheet. Full screen hides the gap and the line.
+    self._sheet_edge_gap = Screen:scaleBySize(10)
+    self._sheet_edge_h = math.max(Size.line.thick, Screen:scaleBySize(3))
+    self.sheet_edge_gap = VerticalSpan:new{ width = 0 }
+    self.sheet_edge = LineWidget:new{
+        background = Settings.getRuleFg(),
+        dimen = Geom:new{
+            w = content_w,
+            h = 0,
+        },
+    }
 
     self.panel = FrameContainer:new{
         bordersize = 0,
@@ -335,6 +347,8 @@ function ModernMenuShell:init()
             self.tab_rule,
             self.scroll_container,
             self.qm_footer_slot,
+            self.sheet_edge_gap,
+            self.sheet_edge,
         },
     }
 
@@ -378,10 +392,41 @@ function ModernMenuShell:init()
         return false
     end
 
-    -- chrome_hit first so the enlarged corner zones win over the glyph button.
+    -- Full-screen catcher under the sheet. A tap below a short menu closes it.
+    -- Inside the sheet this returns false so the rows still receive the tap.
+    self._sheet_h = self.dimen.h
+    local dismiss_range = Geom:new{
+        x = 0, y = 0,
+        w = self.dimen.w,
+        h = self.dimen.h,
+    }
+    self.dismiss_hit = InputContainer:new{
+        dimen = dismiss_range,
+        skip_paint = true,
+        ges_events = {
+            TapDismissMenu = {
+                GestureRange:new{
+                    ges = "tap",
+                    range = dismiss_range,
+                },
+            },
+        },
+    }
+    self.dismiss_hit.onTapDismissMenu = function(_, ges)
+        local sheet = self._sheet_h or self.dimen.h
+        if not ges or not ges.pos or ges.pos.y < sheet then
+            return false
+        end
+        self:closeMenu()
+        return true
+    end
+
+    -- dismiss_hit first so a tap below the sheet closes before the rows see it.
+    -- chrome_hit stays ahead of the panel so the corner zones win over the glyphs.
     self[1] = OverlapGroup:new{
         dimen = self.dimen,
         allow_mirroring = false,
+        self.dismiss_hit,
         self.chrome_hit,
         self.panel,
     }
@@ -498,6 +543,84 @@ function ModernMenuShell:_emptyNotice(text)
     }
 end
 
+--- Status bar, title, tabs, and the rule under them.
+function ModernMenuShell:_chromeHeight()
+    local header_h = self._header_h or 0
+    local tabs_h = (self.tab_bar and self.tab_bar.height or 0) + Screen:scaleBySize(4)
+    local rule_h = Screen:scaleBySize(4)
+        + math.max(Size.line.thick, Screen:scaleBySize(2))
+        + Screen:scaleBySize(8)
+    return (self.status_h or 0) + header_h + tabs_h + rule_h + Screen:scaleBySize(4)
+end
+
+--- White sheet height. Full screen, a percentage of the screen, or the rows.
+-- The list scrolls when the rows are taller than the sheet. A short sheet
+-- stays at the top; a tap below it closes the menu.
+function ModernMenuShell:_applySheetHeight(footer_h)
+    footer_h = footer_h or 0
+    local screen_h = (self.dimen and self.dimen.h) or Screen:getHeight()
+    local chrome_h = self:_chromeHeight()
+    local mode = Settings.getMenuHeightMode()
+    local edge_h = 0
+    local edge_gap = 0
+    local edge_line = 0
+    if mode ~= Settings.MENU_HEIGHT_FULL then
+        edge_gap = self._sheet_edge_gap or 0
+        edge_line = self._sheet_edge_h or 0
+        edge_h = edge_gap + edge_line
+    end
+    if self.sheet_edge_gap then
+        self.sheet_edge_gap.width = edge_gap
+    end
+    if self.sheet_edge and self.sheet_edge.dimen then
+        self.sheet_edge.dimen.h = edge_line
+        self.sheet_edge.background = Settings.getRuleFg()
+    end
+    local min_list = Screen:scaleBySize(mode == Settings.MENU_HEIGHT_FULL and 120 or 80)
+    local max_list = math.max(min_list, screen_h - chrome_h - footer_h - edge_h)
+    local list_h = max_list
+    if mode == Settings.MENU_HEIGHT_PERCENT then
+        local sheet = math.floor(screen_h * Settings.getMenuHeightPercent() / 100)
+        sheet = math.max(chrome_h + min_list + edge_h, math.min(screen_h, sheet))
+        list_h = math.max(min_list, sheet - chrome_h - footer_h - edge_h)
+    elseif mode == Settings.MENU_HEIGHT_CONTENT then
+        local content_h = 0
+        local body = self.scroll_container and self.scroll_container[1]
+        if body and body.getSize then
+            local size = body:getSize()
+            content_h = size and size.h or 0
+        end
+        if content_h < 1 then
+            content_h = min_list
+        end
+        list_h = math.min(max_list, math.max(min_list, content_h))
+    end
+    local sheet_h = math.min(screen_h, chrome_h + list_h + footer_h + edge_h)
+    list_h = math.max(1, sheet_h - chrome_h - footer_h - edge_h)
+    self._sheet_h = sheet_h
+    if self.list_dimen then
+        self.list_dimen.h = list_h
+    end
+    if self.scroll_container and self.scroll_container.dimen then
+        self.scroll_container.dimen.h = list_h
+    end
+    if self.panel then
+        self.panel.height = sheet_h
+        if self.panel.dimen then
+            self.panel.dimen.h = sheet_h
+        end
+    end
+end
+
+function ModernMenuShell:_dirtyMenu()
+    -- A short sheet must repaint the app underneath the area it no longer covers.
+    if Settings.getMenuHeightMode() == Settings.MENU_HEIGHT_FULL then
+        UIManager:setDirty(self:_dirtyTarget(), "ui")
+    else
+        UIManager:setDirty("all", "ui")
+    end
+end
+
 function ModernMenuShell:_rebuildContent()
     self:_clearGroup(self.list_group)
     self:_clearGroup(self.qm_footer_slot)
@@ -536,11 +659,7 @@ function ModernMenuShell:_rebuildContent()
         local slot_size = self.qm_footer_slot:getSize()
         footer_h = slot_size and slot_size.h or 0
     end
-    if self.list_h_base and self.list_dimen and self.scroll_container then
-        local list_h = math.max(Screen:scaleBySize(80), self.list_h_base - footer_h)
-        self.list_dimen.h = list_h
-        self.scroll_container.dimen.h = list_h
-    end
+    self._pending_footer_h = footer_h
 
     local content = self.list_group
     if panel_widget then
@@ -583,6 +702,8 @@ function ModernMenuShell:_rebuildContent()
     -- Reset scroll state so the next paint recomputes overflow + scrollbar.
     -- A live _bb would blit the previous button glyphs over the new panel.
     self.scroll_container[1] = content
+    -- Size the sheet after the rows exist so "fit content" can measure them.
+    self:_applySheetHeight(self._pending_footer_h or 0)
     if self.scroll_container.reset then
         self.scroll_container:reset()
     else
@@ -612,7 +733,7 @@ end
 -- can paint the shell while those glyphs still show the previous state.
 function ModernMenuShell:refreshQuickMenu()
     self:_rebuildContent()
-    UIManager:setDirty(self:_dirtyTarget(), "ui")
+    self:_dirtyMenu()
 end
 
 function ModernMenuShell:_applyChromeFont()
@@ -648,7 +769,7 @@ function ModernMenuShell:refresh()
         self.status_bar:refresh()
     end
     self:_rebuildContent()
-    UIManager:setDirty(self:_dirtyTarget(), "ui")
+    self:_dirtyMenu()
 end
 
 function ModernMenuShell:closeMenu()

@@ -18,6 +18,8 @@ local KEY_OPTION_PADDING = "modern_menu_option_padding"
 local KEY_PURE_BLACK = "modern_menu_pure_black"
 local KEY_MENU_FONT = "modern_menu_font"
 local KEY_DEFAULT_TAB = "modern_menu_default_tab"
+local KEY_MENU_HEIGHT_MODE = "modern_menu_height_mode"
+local KEY_MENU_HEIGHT_PERCENT = "modern_menu_height_percent"
 
 -- Defaults tuned for phone / e-ink readability.
 Settings.DEFAULT_TAB_FONT_SIZE = 17
@@ -39,6 +41,14 @@ Settings.DEFAULT_OPTION_PADDING = 6
 Settings.MIN_OPTION_PADDING = -10
 Settings.MAX_OPTION_PADDING = 20
 
+-- How tall the drop-down menu is. "full" fills the screen.
+Settings.MENU_HEIGHT_FULL = "full"
+Settings.MENU_HEIGHT_CONTENT = "content"
+Settings.MENU_HEIGHT_PERCENT = "percent"
+Settings.DEFAULT_MENU_HEIGHT_PERCENT = 70
+Settings.MIN_MENU_HEIGHT_PERCENT = 40
+Settings.MAX_MENU_HEIGHT_PERCENT = 100
+
 local ALL_KEYS = {
     KEY_TAB_FONT_SIZE,
     KEY_TAB_ICONS_ONLY,
@@ -48,6 +58,8 @@ local ALL_KEYS = {
     KEY_PURE_BLACK,
     KEY_MENU_FONT,
     KEY_DEFAULT_TAB,
+    KEY_MENU_HEIGHT_MODE,
+    KEY_MENU_HEIGHT_PERCENT,
 }
 
 local function read(key, default)
@@ -205,6 +217,40 @@ function Settings.getDefaultTabId()
         return nil
     end
     return id
+end
+
+--- "full", "content" (as tall as the rows, capped at the screen), or "percent".
+function Settings.getMenuHeightMode()
+    local mode = read(KEY_MENU_HEIGHT_MODE, Settings.MENU_HEIGHT_FULL)
+    if mode == Settings.MENU_HEIGHT_CONTENT or mode == Settings.MENU_HEIGHT_PERCENT then
+        return mode
+    end
+    return Settings.MENU_HEIGHT_FULL
+end
+
+function Settings.setMenuHeightMode(mode)
+    if mode ~= Settings.MENU_HEIGHT_CONTENT and mode ~= Settings.MENU_HEIGHT_PERCENT then
+        mode = Settings.MENU_HEIGHT_FULL
+    end
+    write(KEY_MENU_HEIGHT_MODE, mode)
+end
+
+function Settings.getMenuHeightPercent()
+    return clamp_int(
+        read(KEY_MENU_HEIGHT_PERCENT, Settings.DEFAULT_MENU_HEIGHT_PERCENT),
+        Settings.MIN_MENU_HEIGHT_PERCENT,
+        Settings.MAX_MENU_HEIGHT_PERCENT,
+        Settings.DEFAULT_MENU_HEIGHT_PERCENT
+    )
+end
+
+function Settings.setMenuHeightPercent(percent)
+    write(KEY_MENU_HEIGHT_PERCENT, clamp_int(
+        percent,
+        Settings.MIN_MENU_HEIGHT_PERCENT,
+        Settings.MAX_MENU_HEIGHT_PERCENT,
+        Settings.DEFAULT_MENU_HEIGHT_PERCENT
+    ))
 end
 
 function Settings.setDefaultTabId(id)

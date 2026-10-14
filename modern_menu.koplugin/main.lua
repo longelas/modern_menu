@@ -368,6 +368,83 @@ function ModernMenu:addToMainMenu(menu_items)
                 end,
             },
             {
+                text_func = function()
+                    local mode = Settings.getMenuHeightMode()
+                    if mode == Settings.MENU_HEIGHT_CONTENT then
+                        return _("Menu height: Fit content")
+                    end
+                    if mode == Settings.MENU_HEIGHT_PERCENT then
+                        return T(_("Menu height: %1% of screen"), Settings.getMenuHeightPercent())
+                    end
+                    return _("Menu height: Full screen")
+                end,
+                sub_item_table = {
+                    {
+                        text = _("Full screen"),
+                        checked_func = function()
+                            return Settings.getMenuHeightMode() == Settings.MENU_HEIGHT_FULL
+                        end,
+                        radio = true,
+                        keep_menu_open = true,
+                        callback = function(touchmenu_instance)
+                            Settings.setMenuHeightMode(Settings.MENU_HEIGHT_FULL)
+                            if touchmenu_instance then
+                                touchmenu_instance:updateItems()
+                            end
+                        end,
+                    },
+                    {
+                        text = _("Fit content"),
+                        checked_func = function()
+                            return Settings.getMenuHeightMode() == Settings.MENU_HEIGHT_CONTENT
+                        end,
+                        radio = true,
+                        keep_menu_open = true,
+                        callback = function(touchmenu_instance)
+                            Settings.setMenuHeightMode(Settings.MENU_HEIGHT_CONTENT)
+                            if touchmenu_instance then
+                                touchmenu_instance:updateItems()
+                            end
+                        end,
+                    },
+                    {
+                        text_func = function()
+                            return T(_("Fixed percentage: %1%"), Settings.getMenuHeightPercent())
+                        end,
+                        checked_func = function()
+                            return Settings.getMenuHeightMode() == Settings.MENU_HEIGHT_PERCENT
+                        end,
+                        radio = true,
+                        keep_menu_open = true,
+                        callback = function(touchmenu_instance)
+                            local SpinWidget = require("ui/widget/spinwidget")
+                            UIManager:show(SpinWidget:new{
+                                title_text = _("Menu height"),
+                                info_text = _("Height of the menu as a percentage of the screen. The menu stays at the top and scrolls when the rows do not fit."),
+                                value = Settings.getMenuHeightPercent(),
+                                value_min = Settings.MIN_MENU_HEIGHT_PERCENT,
+                                value_max = Settings.MAX_MENU_HEIGHT_PERCENT,
+                                default_value = Settings.DEFAULT_MENU_HEIGHT_PERCENT,
+                                value_step = 5,
+                                value_hold_step = 10,
+                                -- Set stays available at 70. That number is both the
+                                -- stored default and the value that turns this mode on.
+                                ok_always_enabled = true,
+                                ok_text = _("Set"),
+                                callback = function(spin)
+                                    if not spin then return end
+                                    Settings.setMenuHeightPercent(spin.value)
+                                    Settings.setMenuHeightMode(Settings.MENU_HEIGHT_PERCENT)
+                                    if touchmenu_instance then
+                                        touchmenu_instance:updateItems()
+                                    end
+                                end,
+                            })
+                        end,
+                    },
+                },
+            },
+            {
                 text = _("Reset to defaults"),
                 keep_menu_open = true,
                 callback = function(touchmenu_instance)
