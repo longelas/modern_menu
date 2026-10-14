@@ -600,8 +600,39 @@ local function make_shim(shell, tab)
         return shell:backToUpperMenu(no_close)
     end
 
+    -- Custom buttons call this, then Dispatcher:execute (sendEvent).
+    -- sendEvent only reaches the app once this window is no longer on top.
+    -- Stock TouchMenu closes immediately; the shell defers so a card tap
+    -- does not free widgets mid-gesture. Drop the window now, and free it
+    -- on the next tick after this handler has returned.
     function shim:closeMenu()
-        return shell:closeMenu()
+        if shell._closing then
+            return true
+        end
+        shell._closing = true
+        local cb = shell.close_callback
+        shell.close_callback = nil
+        local parent = shell.show_parent or shell
+        local stack = UIManager._window_stack
+        if stack then
+            for i = #stack, 1, -1 do
+                if stack[i].widget == parent then
+                    if UIManager._dirty then
+                        UIManager._dirty[parent] = nil
+                    end
+                    table.remove(stack, i)
+                end
+            end
+        end
+        UIManager:nextTick(function()
+            if cb then
+                cb()
+            else
+                UIManager:close(parent, "ui")
+            end
+            UIManager:setDirty("all", "ui")
+        end)
+        return true
     end
 
     function shim:onPrevPage()
