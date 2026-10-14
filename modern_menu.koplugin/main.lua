@@ -140,6 +140,50 @@ local function menu_font_items()
     return items
 end
 
+function ModernMenu:_defaultTabItems()
+    local items = {
+        {
+            text = _("Automatic"),
+            checked_func = function()
+                return Settings.getDefaultTabId() == nil
+            end,
+            radio = true,
+            keep_menu_open = true,
+            callback = function(touchmenu_instance)
+                Settings.setDefaultTabId(nil)
+                if touchmenu_instance then
+                    touchmenu_instance:updateItems()
+                end
+            end,
+        },
+    }
+    local menu = self.ui and self.ui.menu
+    local tabs = menu and menu.tab_item_table
+    if type(tabs) ~= "table" then
+        return items
+    end
+    for i, tab in ipairs(tabs) do
+        local key = Settings.tabKey(tab)
+        if key then
+            items[#items + 1] = {
+                text = ModernMenuShell.tabCaption(tab, i, false),
+                checked_func = function()
+                    return Settings.getDefaultTabId() == key
+                end,
+                radio = true,
+                keep_menu_open = true,
+                callback = function(touchmenu_instance)
+                    Settings.setDefaultTabId(key)
+                    if touchmenu_instance then
+                        touchmenu_instance:updateItems()
+                    end
+                end,
+            }
+        end
+    end
+    return items
+end
+
 function ModernMenu:addToMainMenu(menu_items)
     menu_items.modern_menu = {
         text = _("Modern Menu"),
@@ -300,6 +344,27 @@ function ModernMenu:addToMainMenu(menu_items)
                     if touchmenu_instance then
                         touchmenu_instance:updateItems()
                     end
+                end,
+            },
+            {
+                text_func = function()
+                    local id = Settings.getDefaultTabId()
+                    if not id then
+                        return _("Default tab: Automatic")
+                    end
+                    local menu = self.ui and self.ui.menu
+                    local tabs = menu and menu.tab_item_table
+                    if type(tabs) == "table" then
+                        for i, tab in ipairs(tabs) do
+                            if Settings.tabKey(tab) == id then
+                                return T(_("Default tab: %1"), ModernMenuShell.tabCaption(tab, i, false))
+                            end
+                        end
+                    end
+                    return T(_("Default tab: %1"), id)
+                end,
+                sub_item_table_func = function()
+                    return self:_defaultTabItems()
                 end,
             },
             {
@@ -556,6 +621,9 @@ function ModernMenu:showModernMenu(menu_self, tab_index)
     -- Quick Menu inserts its panel tab from setUpdateItemTable. Sync again
     -- so the tab is present even if that table was built earlier.
     QuickMenuHost.sync(menu_self)
+    -- Reader injects the Simple UI tab from onShowMenu, which this hook
+    -- replaces. Make sure the tab exists before the opening index is chosen.
+    QuickMenuHost.ensureSimpleUITab(menu_self)
 
     -- Match ReaderMenu: stop selection / close bottom config
     if menu_self.ui and menu_self.ui.keyselection and menu_self.ui.keyselection.stopHighlightIndicator then

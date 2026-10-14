@@ -17,6 +17,7 @@ local KEY_OPTION_FONT_SIZE = "modern_menu_option_font_size"
 local KEY_OPTION_PADDING = "modern_menu_option_padding"
 local KEY_PURE_BLACK = "modern_menu_pure_black"
 local KEY_MENU_FONT = "modern_menu_font"
+local KEY_DEFAULT_TAB = "modern_menu_default_tab"
 
 -- Defaults tuned for phone / e-ink readability.
 Settings.DEFAULT_TAB_FONT_SIZE = 17
@@ -46,6 +47,7 @@ local ALL_KEYS = {
     KEY_OPTION_PADDING,
     KEY_PURE_BLACK,
     KEY_MENU_FONT,
+    KEY_DEFAULT_TAB,
 }
 
 local function read(key, default)
@@ -179,6 +181,41 @@ function Settings.getOptionPaddingPx()
     end
     local scaled = Screen:scaleBySize(math.abs(pad))
     return pad < 0 and -scaled or scaled
+end
+
+--- Stable id for a menu tab. Nil when the tab has neither id nor icon.
+function Settings.tabKey(tab)
+    if type(tab) ~= "table" then
+        return nil
+    end
+    if type(tab.id) == "string" and tab.id ~= "" then
+        return tab.id
+    end
+    if type(tab.icon) == "string" and tab.icon ~= "" then
+        return "icon:" .. tab.icon
+    end
+    return nil
+end
+
+--- Tab to show when the menu opens. Nil means the existing automatic choice
+-- (Neo / Quick Menu defaults, then the last KOReader tab).
+function Settings.getDefaultTabId()
+    local id = read(KEY_DEFAULT_TAB, nil)
+    if type(id) ~= "string" or id == "" then
+        return nil
+    end
+    return id
+end
+
+function Settings.setDefaultTabId(id)
+    if type(id) ~= "string" or id == "" then
+        del(KEY_DEFAULT_TAB)
+        if G_reader_settings then
+            G_reader_settings:flush()
+        end
+        return
+    end
+    write(KEY_DEFAULT_TAB, id)
 end
 
 --- Face name from KOReader's font menu. Nil means the stock UI font.

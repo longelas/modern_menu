@@ -33,6 +33,7 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local datetime = require("datetime")
 local logger = require("logger")
+local Settings = require("settings")
 local Screen = Device.screen
 local _ = require("gettext")
 
@@ -133,6 +134,15 @@ end
 -- is not forcing its tab.
 function QuickMenuHost.initialIndex(menu_self, tab_index)
     local tabs = menu_self and menu_self.tab_item_table or {}
+    -- An explicit Modern Menu choice wins over Neo and Quick Menu defaults.
+    local wanted = Settings.getDefaultTabId()
+    if wanted then
+        for i, tab in ipairs(tabs) do
+            if Settings.tabKey(tab) == wanted then
+                return i
+            end
+        end
+    end
     for i, tab in ipairs(tabs) do
         if tab.id == "quick_menu_tab" and type(tab.remember) == "function" then
             local ok, remember = pcall(tab.remember)
@@ -278,6 +288,110 @@ local function slider_list(touch_menu)
     return sliders
 end
 
+local function module_upvalue(fn, wanted)
+    if type(fn) ~= "function" or not debug or not debug.getupvalue then
+        return nil
+    end
+    local index = 1
+    while true do
+        local ok, name, value = pcall(debug.getupvalue, fn, index)
+        if not ok or not name then
+            return nil
+        end
+        if name == wanted then
+            return value
+        end
+        index = index + 1
+    end
+end
+
+--- Simple UI builds its quick-action row inside a patched TouchMenu.
+-- Those two locals are upvalues of the patched methods.
+local function simpleui_builders()
+    local ok, TouchMenu = pcall(require, "ui/widget/touchmenu")
+    if not ok or not TouchMenu then
+        return nil, nil
+    end
+    local build = module_upvalue(TouchMenu.updateItems, "buildPanel")
+    local gesture = module_upvalue(TouchMenu.onTapCloseAllMenus, "handleGesture")
+    if type(build) ~= "function" then
+        return nil, nil
+    end
+    return build, gesture
+end
+
+--- FileManager injects the tab from setUpdateItemTable. Reader injects it
+-- from onShowMenu, which this menu replaces. Call the same inject when
+-- the tab is missing so a chosen default still exists.
+function QuickMenuHost.ensureSimpleUITab(menu_self)
+    local tabs = menu_self and menu_self.tab_item_table
+    if type(tabs) ~= "table" then
+        return
+    end
+    for _, tab in ipairs(tabs) do
+        if tab._sui_qs_panel then
+            return
+        end
+    end
+    local inject
+    local ok_fm, FMMenu = pcall(require, "apps/filemanager/filemanagermenu")
+    if ok_fm and FMMenu then
+        inject = module_upvalue(FMMenu.setUpdateItemTable, "injectPanelTab")
+    end
+    if type(inject) ~= "function" then
+        local ok_rm, RMenu = pcall(require, "apps/reader/modules/readermenu")
+        if ok_rm and RMenu then
+            inject = module_upvalue(RMenu.onShowMenu, "injectPanelTab")
+        end
+    end
+    if type(inject) == "function" then
+        local ok, err = pcall(inject, menu_self)
+        if not ok then
+            logger.warn("modern_menu: simpleui tab inject failed: " .. tostring(err))
+        end
+    end
+end
+
+local function press_sui(touch_menu, ges, kind)
+    if not touch_menu or not touch_menu._sui_qs_refs or not ges then
+        return false
+    end
+    if kind == "hold" then
+        local panel = touch_menu._sui_qs_panel_widget
+        if type(panel) ~= "table" or type(panel.onHoldPanel) ~= "function" then
+            return false
+        end
+        local dimen = panel.dimen
+        if dimen and ges.pos and ges.pos.intersectWith and not ges.pos:intersectWith(dimen) then
+            return false
+        end
+        local ok, handled = pcall(panel.onHoldPanel, panel)
+        if not ok then
+            logger.warn("modern_menu: simpleui hold failed: " .. tostring(handled))
+            return false
+        end
+        return handled == true
+    end
+    local gesture = touch_menu._sui_qs_gesture
+    if type(gesture) ~= "function" then
+        return false
+    end
+    local ok, handled, stay_open = pcall(gesture, touch_menu, ges)
+    if not ok then
+        logger.warn("modern_menu: simpleui button failed: " .. tostring(handled))
+        return false
+    end
+    if not handled then
+        return false
+    end
+    -- The action schedules itself. Drop the window now so that work does
+    -- not land on this menu. In-place actions ask to stay open.
+    if stay_open ~= true and touch_menu.closeMenu then
+        touch_menu:closeMenu()
+    end
+    return true
+end
+
 local function in_scroll_area(shell, ges)
     local dimen = shell.scroll_container and shell.scroll_container.dimen
     return ges and ges.pos and dimen and ges.pos.intersectWith and ges.pos:intersectWith(dimen)
@@ -287,6 +401,11 @@ end
 -- should consume the event (slider handled it, or it must not scroll).
 function QuickMenuHost.dispatch(shell, kind, ges)
     local touch_menu = shell and shell._qm_touch
+    if touch_menu and (kind == "tap" or kind == "hold" or kind == "swipe") then
+        if press_sui(touch_menu, ges, kind) then
+            return true
+        end
+    end
     if not touch_menu or not qm_refs(touch_menu) then
         return false
     end
@@ -633,6 +752,11 @@ local function make_shim(shell, tab)
             UIManager:setDirty("all", "ui")
         end)
         return true
+    end
+
+    -- Simple UI's quick-settings hold calls onClose, then opens its window.
+    function shim:onClose()
+        return shim:closeMenu()
     end
 
     function shim:onPrevPage()
@@ -1219,11 +1343,72 @@ local function detach_slider_blocks(panel, refs)
     return group
 end
 
+local function wrap_panel(shell, panel)
+    local content_w = shell.list_content_w or shell.dimen.w
+    local size = panel.getSize and panel:getSize()
+    return GestureLayer:new{
+        shell = shell,
+        CenterContainer:new{
+            dimen = Geom:new{
+                w = content_w,
+                h = size and size.h or 0,
+            },
+            panel,
+        },
+    }
+end
+
+--- Simple UI's tab has no item list. The buttons live in buildPanel.
+-- @return widget|false, footer|nil, err|nil  false means this is not that tab
+local function fill_simpleui(shell, tab)
+    local nested = shell.item_table_stack and #shell.item_table_stack > 0
+    if nested or not tab or not tab._sui_qs_panel then
+        return false
+    end
+    local build, gesture = simpleui_builders()
+    local shim = shell._qm_touch
+    if not shim or type(shim.updateItems) ~= "function" then
+        shim = make_shim(shell, tab)
+    end
+    sync_shim(shim, shell, tab)
+    shell._qm_touch = shim
+    -- A previous Neo visit leaves slider refs on this shim. A tap must not
+    -- hit those after the page has switched to Simple UI.
+    shim._qs_refs = nil
+    shim._qm_refs = nil
+    shim._sui_qs_gesture = gesture
+    if type(build) ~= "function" then
+        shim._sui_qs_refs = nil
+        shim._sui_qs_panel_widget = nil
+        logger.warn("modern_menu: simpleui panel builder missing")
+        return nil, nil, "simpleui panel unavailable"
+    end
+    local ok, panel, refs = pcall(build, shim)
+    if not ok or type(panel) ~= "table" or not panel.paintTo then
+        shim._sui_qs_refs = nil
+        shim._sui_qs_panel_widget = nil
+        logger.warn("modern_menu: simpleui panel failed: " .. tostring(panel))
+        return nil, nil, panel
+    end
+    shim._sui_qs_refs = refs
+    shim._sui_qs_panel_widget = panel
+    return wrap_panel(shell, panel), nil, nil
+end
+
 --- Build the Quick Menu body for the current tab.
 -- @return widget|nil, footer|nil, err|nil
 function QuickMenuHost.fill(shell)
     shell._qm_pinned_sliders = nil
     local tab = shell.tab_item_table and shell.tab_item_table[shell.last_index]
+    local sui_panel, sui_footer, sui_err = fill_simpleui(shell, tab)
+    if sui_panel ~= false then
+        return sui_panel, sui_footer, sui_err
+    end
+    if shell._qm_touch then
+        shell._qm_touch._sui_qs_refs = nil
+        shell._qm_touch._sui_qs_gesture = nil
+        shell._qm_touch._sui_qs_panel_widget = nil
+    end
     local nested = shell.item_table_stack and #shell.item_table_stack > 0
     local show_panel = tab and tab.panel ~= nil and not nested
     local quick_tab = tab and tab.id == "quick_menu_tab"

@@ -66,6 +66,7 @@ local ID_TITLES = {
     quick_menu_tab = _("Quick menu"),
     exit_tab = _("Exit"),
     neo_quicksettings = _("Neo Quick"),
+    _sui_qs_panel = _("Simple UI"),
 }
 
 local ID_TAB_LABELS = {
@@ -81,6 +82,7 @@ local ID_TAB_LABELS = {
     quick_menu_tab = _("Quick"),
     exit_tab = _("Exit"),
     neo_quicksettings = _("Neo"),
+    _sui_qs_panel = _("Simple"),
 }
 
 local ModernMenuShell = InputContainer:extend{
@@ -413,6 +415,10 @@ function ModernMenuShell:_tabTitle(tab, index, for_strip)
         return short:gsub("^%l", string.upper)
     end
     return _("Menu")
+end
+
+function ModernMenuShell.tabCaption(tab, index, for_strip)
+    return ModernMenuShell._tabTitle(ModernMenuShell, tab, index, for_strip)
 end
 
 function ModernMenuShell:_buildTabDefs()
