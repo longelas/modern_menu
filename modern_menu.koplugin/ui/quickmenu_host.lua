@@ -177,6 +177,15 @@ function QuickMenuHost.initialIndex(menu_self, tab_index)
     if tab and tab.id == "exit_tab" then
         index = math.max(1, index - 1)
     end
+    -- Kobold Home is a button, not a page. Open the menu on the next page.
+    tab = tabs[index]
+    if tab and tab.id == "kobold_home" then
+        if index < #tabs then
+            index = index + 1
+        elseif index > 1 then
+            index = index - 1
+        end
+    end
     -- Neo inserts itself first but, when it is not the default opener,
     -- stock TouchMenu steps past that slot.
     if neo_index and index == neo_index and not neo_default then

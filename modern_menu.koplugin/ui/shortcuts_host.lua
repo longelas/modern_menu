@@ -491,12 +491,13 @@ function ShortcutsHost.ensureFileBrowserBar(ui)
     UIManager:nextTick(inject_now)
 end
 
---- Reader shortcut row, or nil when the plugin is absent or the reader bar is off.
--- Book info and the corner clock stay out: this menu already has its own list
--- and status bar. The back button and shortcut icons are the bottom row the
--- plugin shows when the reader menu opens.
+--- Shortcut row for the bottom of this menu, or nil when that bar is off.
+-- Reader: back button and shortcut icons, without the plugin's book info
+-- or clock (this menu already has a list and a status bar).
+-- File browser: the same plugin's file-browser icons, centered, so they
+-- stay reachable when Simple UI or Kobold covers the file list.
 function ShortcutsHost.build(menu)
-    if not (menu and menu.ui and menu.ui.document) then
+    if not (menu and menu.ui) then
         return nil
     end
     local plugin = ShortcutsHost.findPlugin(menu.ui)
@@ -508,26 +509,33 @@ function ShortcutsHost.build(menu)
     if not ToolbarSettings then
         return nil
     end
-    local ok_cfg, cfg = pcall(ToolbarSettings.readConfig, "reader")
+    local in_reader = menu.ui.document ~= nil
+    local view = in_reader and "reader" or "fb"
+    local ok_cfg, cfg = pcall(ToolbarSettings.readConfig, view)
     if not ok_cfg or type(cfg) ~= "table" or not cfg.enabled then
         return nil
     end
     local has_icons = type(cfg.items) == "string" and cfg.items:find("%S")
-    if not has_icons and cfg.show_back_button == false then
+    if in_reader then
+        if not has_icons and cfg.show_back_button == false then
+            return nil
+        end
+    elseif not has_icons then
         return nil
     end
 
     menu.width = (menu.dimen and menu.dimen.w) or Screen:getWidth()
-    -- Reuse the plugin's layout, but only its bottom row.
+    -- Reuse the plugin's layout, but only its icon row.
     local bar_cfg = {
-        view = "reader",
+        view = view,
         spacing = cfg.spacing,
         enabled = true,
         icon_size = cfg.icon_size,
         items = cfg.items or "",
+        align = cfg.align or (in_reader and "right" or "center"),
         show_book_info = false,
         show_time_and_battery = false,
-        show_back_button = cfg.show_back_button ~= false,
+        show_back_button = in_reader and cfg.show_back_button ~= false,
     }
     local ok_bar, bar = pcall(HomeContent.createHomeContent, menu, bar_cfg, function()
         if menu.refresh then

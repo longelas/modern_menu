@@ -51,7 +51,82 @@ function ModernMenu:onDispatcherRegisterActions()
     })
 end
 
+--- Open whichever menu is actually alive under a Kobold screen.
+-- Opening a book closes the file manager, so Kobold's own top-edge
+-- forward has nothing to call and the pull-down stops working.
+local function open_menu_on_kobold(ges)
+    local menu
+    local ok_fm, FileManager = pcall(require, "apps/filemanager/filemanager")
+    if ok_fm and FileManager and FileManager.instance and FileManager.instance.menu then
+        menu = FileManager.instance.menu
+    end
+    if not menu then
+        local ok_reader, ReaderUI = pcall(require, "apps/reader/readerui")
+        if ok_reader and ReaderUI and ReaderUI.instance and ReaderUI.instance.menu then
+            menu = ReaderUI.instance.menu
+        end
+    end
+    if not menu then
+        return false
+    end
+    if ges and type(menu.onSwipeShowMenu) == "function" then
+        return menu:onSwipeShowMenu(ges) == true
+    end
+    if type(menu.onShowMenu) == "function" then
+        return menu:onShowMenu() == true
+    end
+    return false
+end
+
+local kobold_show_wrapped = false
+
+--- Top-edge swipe and the menu key keep working on every Kobold screen.
+function ModernMenu._armKoboldScreen(screen)
+    if not screen or screen._mm_kobold_armed or type(screen.registerTouchZones) ~= "function" then
+        return
+    end
+    screen._mm_kobold_armed = true
+    screen:registerTouchZones({
+        {
+            id = "KoboldTopMenu",
+            ges = "swipe",
+            screen_zone = {
+                ratio_x = 0,
+                ratio_y = 0,
+                ratio_w = 1,
+                ratio_h = 1 / 8,
+            },
+            handler = function(ges)
+                if not ges or ges.direction ~= "south" then
+                    return false
+                end
+                return open_menu_on_kobold(ges)
+            end,
+        },
+    })
+    screen.key_events = screen.key_events or {}
+    screen.key_events.OpenModernMenu = { { "Menu" } }
+    screen.onOpenModernMenu = function()
+        return open_menu_on_kobold()
+    end
+end
+
+function ModernMenu:_installKoboldMenuAccess()
+    if kobold_show_wrapped then
+        return
+    end
+    kobold_show_wrapped = true
+    local orig_show = UIManager.show
+    UIManager.show = function(ui_mgr, widget, ...)
+        orig_show(ui_mgr, widget, ...)
+        if widget and widget.kobold_tab then
+            ModernMenu._armKoboldScreen(widget)
+        end
+    end
+end
+
 function ModernMenu:init()
+    self:_installKoboldMenuAccess()
     self:_installPackagePath()
     self:onDispatcherRegisterActions()
     self.use_stock_menu = G_reader_settings and G_reader_settings:isTrue("modern_menu_use_stock") or false
@@ -61,6 +136,7 @@ function ModernMenu:init()
     local function boot()
         self:installMenuHook()
         self:installStatusChrome()
+        self:_hookFileManagerMenuGesture()
         self:_registerMainMenu()
         ShortcutsHost.installReplayHook(self.ui)
         ShortcutsHost.ensureFileBrowserBar(self.ui)
@@ -257,7 +333,7 @@ function ModernMenu:addToMainMenu(menu_items)
                     -- label-mode default, so phones get usable targets immediately.
                     if Settings.getTabIconsOnly() then
                         local current = Settings.getTabIconSize()
-                        if current <= Settings.DEFAULT_TAB_ICON_SIZE then
+                        if current == Settings.DEFAULT_TAB_ICON_SIZE then
                             Settings.setTabIconSize(Settings.DEFAULT_TAB_ICON_SIZE_ICONS_ONLY)
                         end
                     end
@@ -517,6 +593,110 @@ function ModernMenu:_registerMainMenu()
     end
 end
 
+--- South swipe / top tap that should open the menu, or nil.
+-- The zone matches KOReader's default top menu band (1/8 of the screen).
+function ModernMenu:_topMenuGesture(event)
+    if not event or event.handler ~= "onGesture" then
+        return nil
+    end
+    local ges = event.args and event.args[1]
+    if type(ges) ~= "table" or not ges.pos or not ges.ges then
+        return nil
+    end
+    local zone_h = Screen:getHeight() / 8
+    if ges.pos.y == nil or ges.pos.y >= zone_h then
+        return nil
+    end
+    return ges
+end
+
+function ModernMenu:_activationMode(menu)
+    local mode = menu and menu.activation_menu
+    if mode == "tap" or mode == "swipe" or mode == "swipe_tap" then
+        return mode
+    end
+    return "swipe_tap"
+end
+
+function ModernMenu:_openMenuFromGesture(menu, ges)
+    if not menu or self.use_stock_menu then
+        return false
+    end
+    local index
+    if menu._getTabIndexFromLocation then
+        index = menu:_getTabIndexFromLocation(ges)
+    end
+    return self:showModernMenu(menu, index)
+end
+
+--- Wrap every menu entry point. A later plugin can replace these methods
+-- during its own startup, so the wrap is applied again on the next tick.
+function ModernMenu:_applyMenuHooks(menu)
+    if not menu then
+        return
+    end
+    local plugin = self
+
+    if type(menu.onShowMenu) == "function" and menu.onShowMenu ~= menu._mm_wrap_show then
+        local previous = menu.onShowMenu
+        menu._modern_menu_original_onShowMenu = previous
+        local function wrapped(menu_self, tab_index, do_not_show)
+            -- Menu search and explicit stock mode keep the classic TouchMenu.
+            if plugin.use_stock_menu or do_not_show then
+                return previous(menu_self, tab_index, do_not_show)
+            end
+            return plugin:showModernMenu(menu_self, tab_index)
+        end
+        menu._mm_wrap_show = wrapped
+        menu.onShowMenu = wrapped
+    end
+
+    if type(menu.onSwipeShowMenu) == "function" and menu.onSwipeShowMenu ~= menu._mm_wrap_swipe then
+        local previous = menu.onSwipeShowMenu
+        local function wrapped(menu_self, ges)
+            if plugin.use_stock_menu or plugin:_activationMode(menu_self) == "tap" then
+                return previous(menu_self, ges)
+            end
+            if not ges or ges.direction ~= "south" then
+                return previous(menu_self, ges)
+            end
+            if menu_self.ui then
+                menu_self.ui:handleEvent(Event:new("HandledAsSwipe"))
+            end
+            return plugin:_openMenuFromGesture(menu_self, ges)
+        end
+        menu._mm_wrap_swipe = wrapped
+        menu.onSwipeShowMenu = wrapped
+    end
+
+    if type(menu.onTapShowMenu) == "function" and menu.onTapShowMenu ~= menu._mm_wrap_tap then
+        local previous = menu.onTapShowMenu
+        local function wrapped(menu_self, ges)
+            if plugin.use_stock_menu or plugin:_activationMode(menu_self) == "swipe" then
+                return previous(menu_self, ges)
+            end
+            return plugin:_openMenuFromGesture(menu_self, ges)
+        end
+        menu._mm_wrap_tap = wrapped
+        menu.onTapShowMenu = wrapped
+    end
+
+    if type(menu.onKeyPressShowMenu) == "function" and menu.onKeyPressShowMenu ~= menu._mm_wrap_key then
+        local previous = menu.onKeyPressShowMenu
+        local function wrapped(menu_self, ...)
+            if plugin.use_stock_menu then
+                return previous(menu_self, ...)
+            end
+            return plugin:showModernMenu(menu_self)
+        end
+        menu._mm_wrap_key = wrapped
+        menu.onKeyPressShowMenu = wrapped
+    end
+
+    menu._modern_menu_hooked = true
+    logger.info("modern_menu: hooked menu show, swipe, tap, and key")
+end
+
 function ModernMenu:installMenuHook()
     local menu = self.ui and self.ui.menu
     if not menu then
@@ -528,24 +708,62 @@ function ModernMenu:installMenuHook()
         end)
         return
     end
-    if menu._modern_menu_hooked then
+    self:_applyMenuHooks(menu)
+    if not menu._modern_menu_rehook_scheduled then
+        menu._modern_menu_rehook_scheduled = true
+        UIManager:nextTick(function()
+            if self.ui and self.ui.menu then
+                self:_applyMenuHooks(self.ui.menu)
+            end
+        end)
+    end
+end
+
+--- Top-edge swipe and tap on the file browser, before a child widget eats them.
+-- Title-bar buttons still receive taps: a tap is opened as the menu only when
+-- no child handled it. Sideways swipes are left to the file list.
+function ModernMenu:_hookFileManagerMenuGesture()
+    local fm = self.ui
+    if not self:_isFileManager() or not fm or not fm.handleEvent then
         return
     end
-    menu._modern_menu_hooked = true
-
-    local plugin = self
-    local original_on_show_menu = menu.onShowMenu
-    menu._modern_menu_original_onShowMenu = original_on_show_menu
-
-    menu.onShowMenu = function(menu_self, tab_index, do_not_show)
-        -- Menu search and explicit stock mode keep the classic TouchMenu
-        if plugin.use_stock_menu or do_not_show then
-            return original_on_show_menu(menu_self, tab_index, do_not_show)
-        end
-        return plugin:showModernMenu(menu_self, tab_index)
+    if fm.handleEvent == fm._mm_wrap_fm_event then
+        return
     end
-
-    logger.info("modern_menu: hooked ui.menu.onShowMenu")
+    local plugin = self
+    local previous = fm.handleEvent
+    local function wrapped(fm_self, event)
+        if not plugin.use_stock_menu then
+            local ges = plugin:_topMenuGesture(event)
+            local menu = fm_self.menu
+            if ges and ges.ges == "swipe" and ges.direction == "south"
+                    and plugin:_activationMode(menu) ~= "tap" then
+                plugin:_openMenuFromGesture(menu, ges)
+                return true
+            end
+            local handled = previous(fm_self, event)
+            if ges and ges.ges == "tap" and not handled
+                    and plugin:_activationMode(menu) ~= "swipe" then
+                plugin:_openMenuFromGesture(menu, ges)
+                return true
+            end
+            return handled
+        end
+        return previous(fm_self, event)
+    end
+    fm._mm_wrap_fm_event = wrapped
+    fm.handleEvent = wrapped
+    fm._modern_menu_gesture_hooked = true
+    logger.info("modern_menu: file browser top edge opens the menu")
+    if not fm._modern_menu_gesture_rehook then
+        fm._modern_menu_gesture_rehook = true
+        UIManager:nextTick(function()
+            fm._modern_menu_gesture_rehook = nil
+            if plugin.ui == fm then
+                plugin:_hookFileManagerMenuGesture()
+            end
+        end)
+    end
 end
 
 function ModernMenu:_isFileManager()
@@ -571,6 +789,7 @@ function ModernMenu:installStatusChrome()
 
     if self:_isFileManager() then
         self:_hookFileManagerLayout()
+        self:_hookFileManagerMenuGesture()
         if StatusBar.elsewhereEnabled() then
             self:_installFileManagerStatusBar()
         else
@@ -710,6 +929,116 @@ function ModernMenu:onModernMenuStatusChromeChanged(enabled)
 end
 
 function ModernMenu:showModernMenu(menu_self, tab_index)
+    if not menu_self then
+        return false
+    end
+    if menu_self.menu_container then
+        return true
+    end
+    local ok, err = pcall(function()
+        self:_buildModernMenu(menu_self, tab_index)
+    end)
+    if ok then
+        return true
+    end
+    logger.warn("modern_menu: failed to open: " .. tostring(err))
+    if menu_self.menu_container then
+        pcall(function()
+            UIManager:close(menu_self.menu_container)
+        end)
+        menu_self.menu_container = nil
+    end
+    local original = menu_self._modern_menu_original_onShowMenu
+    if original and not menu_self._modern_menu_fallback then
+        menu_self._modern_menu_fallback = true
+        local ok_stock, stock_err = pcall(original, menu_self, tab_index)
+        menu_self._modern_menu_fallback = false
+        if not ok_stock then
+            logger.warn("modern_menu: stock menu failed: " .. tostring(stock_err))
+            return false
+        end
+        return true
+    end
+    return false
+end
+
+--- Quick Menu, Neo Quick Settings, and Simple UI stay ahead of Kobold.
+local KOBOLD_AFTER_QUICK = {
+    quick_menu_tab = true,
+    neo_quicksettings = true,
+    _sui_qs_panel = true,
+}
+
+local function is_quick_action_tab(tab)
+    return tab and (KOBOLD_AFTER_QUICK[tab.id] or tab._sui_qs_panel == true)
+end
+
+--- Kobold Home sits after any quick-action tabs and before Library.
+-- Absent when the Kobold plugin is not loaded.
+function ModernMenu:_insertKoboldTab(menu_self)
+    local tabs = menu_self and menu_self.tab_item_table
+    if type(tabs) ~= "table" then
+        return
+    end
+    local ok_loader, PluginLoader = pcall(require, "pluginloader")
+    -- The folder is Kobold.koplugin, so the loader's name is "Kobold".
+    local kobold = ok_loader and PluginLoader.getPluginInstance and (
+        PluginLoader:getPluginInstance("Kobold")
+        or PluginLoader:getPluginInstance("kobold")
+    )
+    if type(kobold) ~= "table" then
+        local ui = menu_self.ui
+        kobold = ui and (ui.Kobold or ui.kobold)
+    end
+    if type(kobold) ~= "table" or type(kobold.showHome) ~= "function" then
+        return
+    end
+
+    local at = 1
+    while tabs[at] and is_quick_action_tab(tabs[at]) do
+        at = at + 1
+    end
+
+    local existing
+    for i, tab in ipairs(tabs) do
+        if tab.id == "kobold_home" then
+            existing = i
+            break
+        end
+    end
+    if existing then
+        if existing ~= at then
+            local tab = table.remove(tabs, existing)
+            if existing < at then
+                at = at - 1
+            end
+            table.insert(tabs, at, tab)
+        end
+        return
+    end
+
+    table.insert(tabs, at, {
+        id = "kobold_home",
+        text = _("Kobold"),
+        icon = "home",
+        -- A tap opens Kobold. It is not a page of menu rows.
+        remember = false,
+        callback = function()
+            kobold:showHome()
+        end,
+    })
+    -- Keep the previously selected page. The saved index lives on the menu
+    -- and, before the first open this session, in KOReader's own setting.
+    local saved = menu_self.last_tab_index
+    if type(saved) ~= "number" and G_reader_settings then
+        saved = G_reader_settings:readSetting("filemanagermenu_tab_index")
+    end
+    if type(saved) == "number" and saved >= at then
+        menu_self.last_tab_index = saved + 1
+    end
+end
+
+function ModernMenu:_buildModernMenu(menu_self, tab_index)
     if menu_self.tab_item_table == nil and menu_self.setUpdateItemTable then
         menu_self:setUpdateItemTable()
     end
@@ -719,6 +1048,7 @@ function ModernMenu:showModernMenu(menu_self, tab_index)
     -- Reader injects the Simple UI tab from onShowMenu, which this hook
     -- replaces. Make sure the tab exists before the opening index is chosen.
     QuickMenuHost.ensureSimpleUITab(menu_self)
+    self:_insertKoboldTab(menu_self)
     ShortcutsHost.installReplayHook(menu_self.ui or self.ui)
 
     -- Match ReaderMenu: stop selection / close bottom config
@@ -729,12 +1059,17 @@ function ModernMenu:showModernMenu(menu_self, tab_index)
         menu_self.ui:handleEvent(Event:new("CloseConfigMenu"))
     end
 
-    -- Real widget container (stock TouchMenu shape). Plain tables crash
-    -- UIManager:close when tab callbacks call onCloseReaderMenu / onCloseFileManagerMenu.
+    -- UIManager only honors modal / covers_fullscreen on the window it is
+    -- given. The shell's own flags are ignored, so a library screen stacked
+    -- above a plain container never paints this menu.
+    local full_height = Settings.getMenuHeightMode() == Settings.MENU_HEIGHT_FULL
     local menu_container = CenterContainer:new{
         covers_header = true,
         ignore = "height",
         dimen = Screen:getSize(),
+        modal = true,
+        -- A short sheet leaves the library or file list visible underneath.
+        covers_fullscreen = full_height and true or false,
     }
 
     local shell = ModernMenuShell:new{
@@ -759,7 +1094,62 @@ function ModernMenu:showModernMenu(menu_self, tab_index)
     -- System shortcuts call close_callback(), then Dispatcher:execute.
     -- The window has to be off the stack before that sendEvent. Full
     -- teardown waits a tick so the icon handler can finish.
+    -- A modal menu is painted above ordinary windows, so a font-size dialog
+    -- or battery screen opened from it would land underneath and stay hidden.
+    -- Keep those windows above this one for as long as the menu is open.
+    local orig_show = UIManager.show
+    local function menu_stack_index()
+        local stack = UIManager._window_stack
+        if not stack then
+            return nil
+        end
+        for i = #stack, 1, -1 do
+            if stack[i].widget == menu_container then
+                return i
+            end
+        end
+    end
+    local function lift_above_menu(widget)
+        local menu_i = menu_stack_index()
+        local stack = UIManager._window_stack
+        if not menu_i or not stack or widget == menu_container then
+            return
+        end
+        local widget_i
+        for i = #stack, 1, -1 do
+            if stack[i].widget == widget then
+                widget_i = i
+                break
+            end
+        end
+        if not widget_i or widget_i > menu_i then
+            return
+        end
+        local window = table.remove(stack, widget_i)
+        table.insert(stack, window)
+        UIManager:setDirty(widget, "ui")
+    end
+    local function wrapped_show(ui_mgr, widget, ...)
+        orig_show(ui_mgr, widget, ...)
+        if not widget or widget == menu_container or not menu_stack_index() then
+            return
+        end
+        -- Kobold replaces the screen. Drop the menu so it is not left on top.
+        if widget.kobold_tab then
+            shell:closeMenu()
+            return
+        end
+        lift_above_menu(widget)
+    end
+    UIManager.show = wrapped_show
+    local function restore_show()
+        if UIManager.show == wrapped_show then
+            UIManager.show = orig_show
+        end
+    end
+
     shell.close_callback = function()
+        restore_show()
         if shell._closing then
             finish_close()
             return
@@ -784,6 +1174,7 @@ function ModernMenu:showModernMenu(menu_self, tab_index)
     menu_container.cropping_widget = shell.scroll_container
     menu_self.menu_container = menu_container
     UIManager:show(menu_container)
+    UIManager:setDirty(menu_container, "ui")
     return true
 end
 

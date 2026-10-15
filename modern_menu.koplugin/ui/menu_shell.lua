@@ -7,7 +7,6 @@ Exposes TouchMenu-compatible closeMenu()/updateItems() for menu callbacks.
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local Button = require("ui/widget/button")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local Event = require("ui/event")
@@ -21,7 +20,6 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local OverlapGroup = require("ui/widget/overlapgroup")
-local RightContainer = require("ui/widget/container/rightcontainer")
 local ScrollableContainer = require("ui/widget/container/scrollablecontainer")
 local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
@@ -68,6 +66,7 @@ local ID_TITLES = {
     exit_tab = _("Exit"),
     neo_quicksettings = _("Neo Quick"),
     _sui_qs_panel = _("Simple UI"),
+    kobold_home = _("Kobold"),
 }
 
 local ID_TAB_LABELS = {
@@ -84,6 +83,7 @@ local ID_TAB_LABELS = {
     exit_tab = _("Exit"),
     neo_quicksettings = _("Neo"),
     _sui_qs_panel = _("Simple"),
+    kobold_home = _("Kobold"),
 }
 
 local ModernMenuShell = InputContainer:extend{
@@ -102,26 +102,6 @@ local ModernMenuShell = InputContainer:extend{
     cropping_widget = nil, -- required by UIManager for ScrollableContainer
 }
 
-local function chrome_button(text, callback, dirty_parent, width, height)
-    -- Large fixed tap target; glyph stays visually light via modest padding.
-    return Button:new{
-        text = text,
-        bordersize = 0,
-        radius = 0,
-        padding = 0,
-        padding_h = Screen:scaleBySize(10),
-        padding_v = Screen:scaleBySize(8),
-        margin = 0,
-        width = width,
-        height = height,
-        text_font_face = "smallinfofont",
-        text_font_size = 26,
-        text_font_bold = true,
-        callback = callback,
-        show_parent = dirty_parent,
-    }
-end
-
 function ModernMenuShell:init()
     self.dimen = Geom:new{
         x = 0, y = 0,
@@ -132,7 +112,7 @@ function ModernMenuShell:init()
     self.tab_item_table = self.tab_item_table or {}
     self.item_table_stack = {}
     self.title_stack = {}
-    self.side_margin = Screen:scaleBySize(36)
+    self.side_margin = Screen:scaleBySize(30)
     self.chrome_h = Screen:scaleBySize(56)
     self.last_index = self.last_index or 1
     if self.last_index < 1 then self.last_index = 1 end
@@ -146,63 +126,66 @@ function ModernMenuShell:init()
     self.scrollbar_gutter = ScrollableContainer:getScrollbarWidth()
     self.list_content_w = content_w - self.scrollbar_gutter
 
-    -- Prefer a phone-comfortable hit target over a tiny glyph-sized button.
-    local chrome_btn_w = Screen:scaleBySize(56)
-    local chrome_btn_h = Screen:scaleBySize(48)
-    self.back_button = chrome_button("‹", function() self:backToUpperMenu() end, dirty_parent, chrome_btn_w, chrome_btn_h)
-    self.close_button = chrome_button("✕", function() self:closeMenu() end, dirty_parent, chrome_btn_w, chrome_btn_h)
-    self:_applyChromeFont()
-
-    -- Keep title between the enlarged chrome buttons; small outer pad so back
-    -- sits near the left edge for easier reach.
-    local chrome_edge_pad = Screen:scaleBySize(8)
-    local title_w = content_w - chrome_edge_pad * 2 - chrome_btn_w * 2
+    -- Title row. Close lives in the status bar, top right, with the other
+    -- status icons. The back chevron is only here once a submenu is open,
+    -- and it uses the same type as the title so it sits on the baseline.
+    self._back_icon = TextWidget:new{
+        text = "‹",
+        face = Settings.face(18, "cfont"),
+        fgcolor = Blitbuffer.COLOR_BLACK,
+    }
+    self._back_placeholder = HorizontalSpan:new{ width = 0 }
+    local back_w = self._back_icon:getSize().w
+    local chrome_btn_h = math.max(self._back_icon:getSize().h, Screen:scaleBySize(22))
+    -- The title starts on the same inset as the clock.
+    local chrome_edge_pad = self.side_margin
+    local chrome_gap = Screen:scaleBySize(8)
+    self._chrome_icon_px = back_w
+    self._chrome_gap = chrome_gap
+    self._chrome_edge_pad = chrome_edge_pad
+    local title_w = content_w - chrome_edge_pad * 2 - back_w - chrome_gap
+    self._title_w = math.max(0, title_w)
 
     self.breadcrumb = Breadcrumb:new{
         crumbs = {},
-        width = title_w,
+        width = math.max(0, title_w),
         show_parent = dirty_parent,
         on_select = function(index)
             self:goToCrumb(index)
         end,
     }
 
+    self.header_row = HorizontalGroup:new{
+        align = "center",
+        self._back_placeholder,
+        HorizontalSpan:new{ width = 0 },
+        LeftContainer:new{
+            dimen = Geom:new{
+                w = math.max(0, title_w),
+                h = chrome_btn_h,
+            },
+            self.breadcrumb,
+        },
+    }
     self.header = FrameContainer:new{
         bordersize = 0,
-        padding_top = Screen:scaleBySize(6),
-        -- Extra bottom margin so the title row reads as its own band.
-        padding_bottom = Screen:scaleBySize(14),
+        padding_top = Screen:scaleBySize(2),
+        padding_bottom = Screen:scaleBySize(2),
         padding_left = chrome_edge_pad,
         padding_right = chrome_edge_pad,
         margin = 0,
         background = Blitbuffer.COLOR_WHITE,
         width = content_w,
-        HorizontalGroup:new{
-            align = "center",
-            LeftContainer:new{
-                dimen = Geom:new{ w = chrome_btn_w, h = chrome_btn_h },
-                self.back_button,
-            },
-            CenterContainer:new{
-                dimen = Geom:new{
-                    w = title_w,
-                    h = chrome_btn_h,
-                },
-                self.breadcrumb,
-            },
-            RightContainer:new{
-                dimen = Geom:new{ w = chrome_btn_w, h = chrome_btn_h },
-                self.close_button,
-            },
-        },
+        self.header_row,
     }
+    self:_applyChromeFont()
 
     self.tab_defs = self:_buildTabDefs()
     self.tab_bar = TabBar:new{
         tabs = self.tab_defs,
         selected = self.last_index,
         width = content_w,
-        -- Same inset as the grey rule so tabs sit in the content box.
+        -- Same inset as the clock, the title, and the close mark.
         side_margin = self.side_margin,
         show_parent = dirty_parent,
         on_change = function(_, index)
@@ -225,23 +208,26 @@ function ModernMenuShell:init()
         end,
     }
 
-    -- Slightly heavier rule with breathing room — clear without shouting.
+    -- Light rule under the tabs, on the same inset as the clock and close mark.
+    -- A gap above the line keeps the tab labels clear of it.
     local rule_w = content_w - 2 * self.side_margin
+    local rule_line_h = Screen:scaleBySize(2)
+    self._tab_rule_gap = Screen:scaleBySize(6)
     self.tab_rule_line = LineWidget:new{
         background = Settings.getRuleFg(),
         dimen = Geom:new{
             w = rule_w,
-            h = math.max(Size.line.thick, Screen:scaleBySize(2)),
+            h = rule_line_h,
         },
     }
     self.tab_rule = VerticalGroup:new{
         align = "left",
-        VerticalSpan:new{ width = Screen:scaleBySize(4) },
+        VerticalSpan:new{ width = self._tab_rule_gap },
         HorizontalGroup:new{
             HorizontalSpan:new{ width = self.side_margin },
             self.tab_rule_line,
         },
-        VerticalSpan:new{ width = Screen:scaleBySize(8) },
+        VerticalSpan:new{ width = Screen:scaleBySize(6) },
     }
 
     self.status_bar = StatusBar.make{
@@ -249,16 +235,18 @@ function ModernMenuShell:init()
         show_parent = dirty_parent,
         width = content_w,
         side_margin = self.side_margin,
-        -- Match list right margin (scrollbar gutter)
-        right_inset = self.scrollbar_gutter,
+        on_dismiss = function()
+            self:closeMenu()
+        end,
+        show_close = true,
     }
     self.status_h = self.status_bar.height
 
     -- Fixed list viewport under chrome; scroll when items overflow
-    local header_h = chrome_btn_h + Screen:scaleBySize(20)
+    local header_h = chrome_btn_h + Screen:scaleBySize(4)
     self._header_h = header_h
     local tabs_h = self.tab_bar.height + Screen:scaleBySize(4)
-    local rule_h = Screen:scaleBySize(4) + math.max(Size.line.thick, Screen:scaleBySize(2)) + Screen:scaleBySize(8)
+    local rule_h = Screen:scaleBySize(2) + self._tab_rule_gap + Screen:scaleBySize(6)
     local list_h = math.max(
         Screen:scaleBySize(120),
         self.dimen.h - self.status_h - header_h - tabs_h - rule_h - Screen:scaleBySize(4)
@@ -325,7 +313,8 @@ function ModernMenuShell:init()
     self._sheet_edge_h = math.max(Size.line.thick, Screen:scaleBySize(3))
     self.sheet_edge_gap = VerticalSpan:new{ width = 0 }
     self.sheet_edge = LineWidget:new{
-        background = Settings.getRuleFg(),
+        -- Always black so the end of the sheet stays obvious on a light page.
+        background = Blitbuffer.COLOR_BLACK,
         dimen = Geom:new{
             w = content_w,
             h = 0,
@@ -352,8 +341,9 @@ function ModernMenuShell:init()
         },
     }
 
-    -- Generous corner hit zones (wider than the visible button) for thumbs.
-    local chrome_zone = chrome_edge_pad + chrome_btn_w + Screen:scaleBySize(12)
+    -- Wide hit target for the back chevron. Close is a status-bar icon.
+    local chrome_zone = chrome_edge_pad + back_w + chrome_gap + Screen:scaleBySize(16)
+    self._chrome_zone = chrome_zone
     local chrome_top = self.status_h or 0
     self.chrome_h = header_h
     local chrome_dimen = Geom:new{
@@ -373,19 +363,15 @@ function ModernMenuShell:init()
             },
         },
     }
-    self.chrome_hit.onTapChromeHit = function(_, ges)
+    -- Gesture handlers are called as (self, args, ges). The gesture is third.
+    self.chrome_hit.onTapChromeHit = function(_, _, ges)
         if not ges or not ges.pos then
             return false
         end
-        -- Header band only (status bar handles its own taps)
         if ges.pos.y < chrome_top or ges.pos.y > chrome_top + self.chrome_h then
             return false
         end
-        if ges.pos.x >= self.dimen.w - chrome_zone then
-            self:closeMenu()
-            return true
-        end
-        if ges.pos.x <= chrome_zone then
+        if #self.item_table_stack > 0 and ges.pos.x <= chrome_zone then
             self:backToUpperMenu()
             return true
         end
@@ -558,9 +544,7 @@ end
 function ModernMenuShell:_chromeHeight()
     local header_h = self._header_h or 0
     local tabs_h = (self.tab_bar and self.tab_bar.height or 0) + Screen:scaleBySize(4)
-    local rule_h = Screen:scaleBySize(4)
-        + math.max(Size.line.thick, Screen:scaleBySize(2))
-        + Screen:scaleBySize(8)
+    local rule_h = Screen:scaleBySize(2) + (self._tab_rule_gap or Screen:scaleBySize(6)) + Screen:scaleBySize(6)
     return (self.status_h or 0) + header_h + tabs_h + rule_h + Screen:scaleBySize(4)
 end
 
@@ -585,7 +569,7 @@ function ModernMenuShell:_applySheetHeight(footer_h)
     end
     if self.sheet_edge and self.sheet_edge.dimen then
         self.sheet_edge.dimen.h = edge_line
-        self.sheet_edge.background = Settings.getRuleFg()
+        self.sheet_edge.background = Blitbuffer.COLOR_BLACK
     end
     local min_list = Screen:scaleBySize(mode == Settings.MENU_HEIGHT_FULL and 120 or 80)
     local max_list = math.max(min_list, screen_h - chrome_h - footer_h - edge_h)
@@ -684,8 +668,12 @@ function ModernMenuShell:_rebuildContent()
                 h = math.max(Size.line.thick, Screen:scaleBySize(1)),
             },
         })
+        -- The row already pads itself, and the black edge has a gap below.
+        -- Match that gap above so the icons sit in the middle of the band.
+        table.insert(self.qm_footer_slot, VerticalSpan:new{
+            width = self._sheet_edge_gap or 0,
+        })
         table.insert(self.qm_footer_slot, shortcuts_bar)
-        table.insert(self.qm_footer_slot, VerticalSpan:new{ width = Screen:scaleBySize(6) })
     end
 
     local footer_h = 0
@@ -781,17 +769,26 @@ function ModernMenuShell:refreshQuickMenu()
 end
 
 function ModernMenuShell:_applyChromeFont()
-    local function apply(button)
-        local label = button and button.label_widget
-        if not label then
-            return
-        end
-        label.face = Settings.face(button.text_font_size, "smallinfofont")
-        label._face_adjusted = nil
-        label:free()
+    -- The chevron belongs to a submenu. The root title starts at the left inset.
+    if not self.header_row then
+        return
     end
-    apply(self.back_button)
-    apply(self.close_button)
+    local nested = #(self.item_table_stack or {}) > 0
+    self.header_row[1] = nested and self._back_icon or self._back_placeholder
+    if self.header_row[2] then
+        self.header_row[2].width = nested and (self._chrome_gap or 0) or 0
+    end
+    -- The title slot grows into the chevron's space while the menu is at its root.
+    local title_slot = self.header_row[3]
+    if title_slot and title_slot.dimen and self._title_w then
+        local extra = nested and 0 or ((self._chrome_icon_px or 0) + (self._chrome_gap or 0))
+        title_slot.dimen.w = self._title_w + extra
+    end
+    -- The row caches its offsets. Without this, the title stays where it
+    -- was at the root and draws underneath the chevron.
+    if self.header_row.resetLayout then
+        self.header_row:resetLayout()
+    end
 end
 
 function ModernMenuShell:refresh()

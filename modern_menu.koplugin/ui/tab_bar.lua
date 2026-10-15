@@ -1,6 +1,6 @@
 --[[--
-Tab bar with stock KOReader appbar icons + short labels.
-Equal columns inside an inset box matching the grey rule / content margins.
+Tab bar in the Kobold library style: icon and cfont label, bold when
+selected. A light rule under the row is drawn by the menu shell.
 @module modern_menu.ui.tab_bar
 --]]
 
@@ -35,10 +35,19 @@ local TabBar = InputContainer:extend{
 }
 
 function TabBar:_applyLayoutMetrics()
-    local pad = Screen:scaleBySize(12)
-    local gap = self.icons_only and 0 or Screen:scaleBySize(2)
-    local label_h = self.icons_only and 0 or (self.face_size + Screen:scaleBySize(4))
-    self.height = math.max(Screen:scaleBySize(48), self.icon_size + gap + label_h + pad)
+    local gap = self.icons_only and 0 or Screen:scaleBySize(3)
+    local label_h = 0
+    if not self.icons_only then
+        -- Measure the real face, including descenders, so the row is tall
+        -- enough and the label does not run into the rule below.
+        local probe = TextWidget:new{
+            text = "Ag",
+            face = Settings.face(self.face_size or Settings.getTabFontSize(), "cfont"),
+            bold = true,
+        }
+        label_h = probe:getSize().h
+    end
+    self.height = self.icon_size + gap + label_h + Screen:scaleBySize(2)
     self.inner_width = math.max(0, self.width - 2 * self.side_margin)
     if self.dimen then
         self.dimen.w = self.width
@@ -94,24 +103,35 @@ function TabBar:init()
     }
 end
 
+function TabBar:_labelWidth(text, max_width)
+    local face = Settings.face(self.face_size, "cfont")
+    -- Bold is wider. Measure that so selecting a tab does not shift the row.
+    local probe = TextWidget:new{
+        text = text,
+        face = face,
+        bold = true,
+        max_width = max_width,
+        truncate_with_ellipsis = true,
+    }
+    return probe:getSize().w
+end
+
 function TabBar:_rebuildTabs()
     if self.row.clear then
         self.row:clear()
     else
         for i = #self.row, 1, -1 do self.row[i] = nil end
     end
+    self._slots = {}
 
     local count = math.max(#self.tabs, 1)
-    -- Even columns fill the inset box — comfortable gaps without edge overflow.
-    local tab_w = math.floor(self.inner_width / count)
-    local label_max = math.max(Screen:scaleBySize(12), tab_w - Screen:scaleBySize(8))
-    local icon_px = math.min(self.icon_size, math.max(Screen:scaleBySize(16), tab_w - Screen:scaleBySize(8)))
-    local unselected_fg = Settings.getMutedFg()
+    local label_max = math.max(Screen:scaleBySize(12), math.floor(self.inner_width / count) - Screen:scaleBySize(8))
+    local icon_px = math.min(self.icon_size, math.max(Screen:scaleBySize(16), math.floor(self.inner_width / count) - Screen:scaleBySize(8)))
 
+    local blocks = {}
     for i, tab in ipairs(self.tabs) do
         local selected = (i == self.selected)
         local parts = VerticalGroup:new{ align = "center" }
-
         local showed_icon = false
         if tab.icon and tab.icon ~= "" then
             local ok, icon = pcall(function()
@@ -132,26 +152,70 @@ function TabBar:_rebuildTabs()
             end
         end
 
+        local block_w = showed_icon and icon_px or 0
         -- Icons-only still needs a label when the icon name is unknown
         -- (Quick Menu's "home" / "exit" glyphs, for example).
         if not self.icons_only or not showed_icon then
-            table.insert(parts, TextWidget:new{
+            local text_w = self:_labelWidth(tab.title, label_max)
+            block_w = math.max(block_w, text_w)
+            local label = TextWidget:new{
                 text = tab.title,
-                face = Settings.face(self.face_size, "xx_smallinfofont"),
+                face = Settings.face(self.face_size, "cfont"),
                 bold = selected,
-                fgcolor = selected and Blitbuffer.COLOR_BLACK or unselected_fg,
+                fgcolor = Blitbuffer.COLOR_BLACK,
                 max_width = label_max,
                 truncate_with_ellipsis = true,
+            }
+            -- The icon sits in the middle of this width, bold or not.
+            table.insert(parts, CenterContainer:new{
+                dimen = Geom:new{ w = text_w, h = label:getSize().h },
+                label,
             })
         end
 
-        table.insert(self.row, CenterContainer:new{
-            dimen = Geom:new{
-                w = tab_w,
-                h = self.height,
-            },
-            parts,
-        })
+        blocks[i] = { widget = parts, w = math.max(block_w, 1) }
+    end
+
+    -- First word starts on the clock's margin, last word ends on the close
+    -- mark. Icon centers are spaced evenly between those two.
+    local n = #blocks
+    local centers = {}
+    if n == 1 then
+        centers[1] = blocks[1].w / 2
+    else
+        local first = blocks[1].w / 2
+        local last = self.inner_width - blocks[n].w / 2
+        if last < first then
+            last = first
+        end
+        for i = 1, n do
+            centers[i] = first + (i - 1) * (last - first) / (n - 1)
+        end
+    end
+
+    local cursor = 0
+    for i, block in ipairs(blocks) do
+        local left = math.floor(centers[i] - block.w / 2 + 0.5)
+        if i == 1 then
+            left = 0
+        elseif i == n then
+            left = math.max(cursor, self.inner_width - block.w)
+        elseif left < cursor then
+            left = cursor
+        end
+        local gap = left - cursor
+        if gap > 0 then
+            table.insert(self.row, HorizontalSpan:new{ width = gap })
+        end
+        table.insert(self.row, block.widget)
+        self._slots[i] = { x = left, w = block.w }
+        cursor = left + block.w
+    end
+    if self.row.resetLayout then
+        self.row:resetLayout()
+    end
+    if self[1] and self[1].resetLayout then
+        self[1]:resetLayout()
     end
 end
 
@@ -196,19 +260,28 @@ function TabBar:_indexAt(ges)
     if not ges or not ges.pos or not self.dimen then
         return nil
     end
-    local count = math.max(#self.tabs, 1)
-    local tab_w = math.floor(self.inner_width / count)
-    if tab_w <= 0 then
+    local slots = self._slots
+    if not slots or #slots == 0 then
         return nil
     end
     local rel_x = ges.pos.x - self.dimen.x - self.side_margin
-    if rel_x < 0 or rel_x >= self.inner_width then
-        return nil
+    for i, slot in ipairs(slots) do
+        local left = 0
+        local right = self.inner_width
+        local mid = slot.x + slot.w / 2
+        if i > 1 then
+            local prev = slots[i - 1]
+            left = (prev.x + prev.w / 2 + mid) / 2
+        end
+        if i < #slots then
+            local nxt = slots[i + 1]
+            right = (mid + nxt.x + nxt.w / 2) / 2
+        end
+        if rel_x >= left and rel_x < right then
+            return i
+        end
     end
-    local index = math.floor(rel_x / tab_w) + 1
-    if index < 1 then index = 1 end
-    if index > #self.tabs then index = #self.tabs end
-    return index
+    return nil
 end
 
 return TabBar

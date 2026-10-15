@@ -52,7 +52,7 @@ function ToggleCard:init()
     if self.subtitle and self.subtitle ~= "" then
         table.insert(left_column, TextWidget:new{
             text = self.subtitle,
-            face = require("settings").face(18, "xx_smallinfofont"),
+            face = require("settings").face(18, "cfont"),
             fgcolor = Blitbuffer.COLOR_DARK_GRAY,
             max_width = (self.width or Screen:getWidth()) - Screen:scaleBySize(100),
         })

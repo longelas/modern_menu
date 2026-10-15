@@ -21,23 +21,24 @@ local KEY_DEFAULT_TAB = "modern_menu_default_tab"
 local KEY_MENU_HEIGHT_MODE = "modern_menu_height_mode"
 local KEY_MENU_HEIGHT_PERCENT = "modern_menu_height_percent"
 
--- Defaults tuned for phone / e-ink readability.
-Settings.DEFAULT_TAB_FONT_SIZE = 17
-Settings.MIN_TAB_FONT_SIZE = 12
+-- Defaults tuned for a compact header. The minimums sit below those
+-- defaults so a smaller label or icon can still be chosen.
+Settings.DEFAULT_TAB_FONT_SIZE = 12
+Settings.MIN_TAB_FONT_SIZE = 8
 Settings.MAX_TAB_FONT_SIZE = 26
 
-Settings.DEFAULT_TAB_ICON_SIZE = 26
+Settings.DEFAULT_TAB_ICON_SIZE = 20
 Settings.DEFAULT_TAB_ICON_SIZE_ICONS_ONLY = 32
-Settings.MIN_TAB_ICON_SIZE = 20
+Settings.MIN_TAB_ICON_SIZE = 10
 Settings.MAX_TAB_ICON_SIZE = 40
 
-Settings.DEFAULT_OPTION_FONT_SIZE = 22
+Settings.DEFAULT_OPTION_FONT_SIZE = 17
 Settings.MIN_OPTION_FONT_SIZE = 8
 Settings.MAX_OPTION_FONT_SIZE = 28
 
 -- Vertical padding inside each option row (unscaled logical units).
 -- Negative values tighten rows below the default minimum height.
-Settings.DEFAULT_OPTION_PADDING = 6
+Settings.DEFAULT_OPTION_PADDING = -4
 Settings.MIN_OPTION_PADDING = -10
 Settings.MAX_OPTION_PADDING = 20
 
@@ -48,19 +49,6 @@ Settings.MENU_HEIGHT_PERCENT = "percent"
 Settings.DEFAULT_MENU_HEIGHT_PERCENT = 70
 Settings.MIN_MENU_HEIGHT_PERCENT = 40
 Settings.MAX_MENU_HEIGHT_PERCENT = 100
-
-local ALL_KEYS = {
-    KEY_TAB_FONT_SIZE,
-    KEY_TAB_ICONS_ONLY,
-    KEY_TAB_ICON_SIZE,
-    KEY_OPTION_FONT_SIZE,
-    KEY_OPTION_PADDING,
-    KEY_PURE_BLACK,
-    KEY_MENU_FONT,
-    KEY_DEFAULT_TAB,
-    KEY_MENU_HEIGHT_MODE,
-    KEY_MENU_HEIGHT_PERCENT,
-}
 
 local function read(key, default)
     if not G_reader_settings then
@@ -221,7 +209,7 @@ end
 
 --- "full", "content" (as tall as the rows, capped at the screen), or "percent".
 function Settings.getMenuHeightMode()
-    local mode = read(KEY_MENU_HEIGHT_MODE, Settings.MENU_HEIGHT_FULL)
+    local mode = read(KEY_MENU_HEIGHT_MODE, Settings.MENU_HEIGHT_CONTENT)
     if mode == Settings.MENU_HEIGHT_CONTENT or mode == Settings.MENU_HEIGHT_PERCENT then
         return mode
     end
@@ -264,9 +252,49 @@ function Settings.setDefaultTabId(id)
     write(KEY_DEFAULT_TAB, id)
 end
 
---- Face name from KOReader's font menu. Nil means the stock UI font.
+-- Kobold draws with KOReader's cfont, which ships as Noto Sans.
+Settings.KOBOLD_FONT_NAME = "Noto Sans"
+
+local resolve_menu_font_name
+
+--- Noto Sans when KOReader has that face, otherwise nil (plain cfont).
+function Settings.defaultMenuFont()
+    if Settings._default_menu_font ~= nil then
+        if Settings._default_menu_font == false then
+            return nil
+        end
+        return Settings._default_menu_font
+    end
+    local name = Settings.KOBOLD_FONT_NAME
+    local faces = Settings.fontChoices()
+    local listed = false
+    if type(faces) == "table" then
+        for _, face_name in ipairs(faces) do
+            if face_name == name then
+                listed = true
+                break
+            end
+        end
+    end
+    local file = select(1, resolve_menu_font_name(name))
+    if file or listed then
+        Settings._default_menu_font = name
+        return name
+    end
+    -- An empty font list means crengine is not ready yet. Try again later.
+    if type(faces) == "table" and #faces > 0 and not file then
+        Settings._default_menu_font = false
+    end
+    return nil
+end
+
+--- Face name from KOReader's font menu.
+-- Nil means the stock UI font. An unset preference uses Kobold's Noto Sans.
 function Settings.getMenuFont()
     local name = read(KEY_MENU_FONT, nil)
+    if name == nil then
+        return Settings.defaultMenuFont()
+    end
     if type(name) ~= "string" or name == "" then
         return nil
     end
@@ -275,19 +303,16 @@ end
 
 function Settings.setMenuFont(name)
     Settings._font_file = nil
-    if type(name) ~= "string" or name == "" then
-        del(KEY_MENU_FONT)
-        if G_reader_settings then
-            G_reader_settings:flush()
-        end
+    if name == nil or type(name) ~= "string" or name == "" then
+        -- Explicit stock UI font, distinct from the unset Kobold default.
+        write(KEY_MENU_FONT, "")
         return
     end
     write(KEY_MENU_FONT, name)
 end
 
-local function resolve_menu_font()
-    local name = Settings.getMenuFont()
-    if not name then
+function resolve_menu_font_name(name)
+    if type(name) ~= "string" or name == "" then
         return nil, nil
     end
     if Settings._font_file and Settings._font_file.name == name then
@@ -307,6 +332,10 @@ local function resolve_menu_font()
     return file, index
 end
 
+local function resolve_menu_font()
+    return resolve_menu_font_name(Settings.getMenuFont())
+end
+
 --- A face at `size`, using the chosen menu font when one is set.
 function Settings.face(size, fallback)
     local file, index = resolve_menu_font()
@@ -316,7 +345,7 @@ function Settings.face(size, fallback)
             return face
         end
     end
-    return Font:getFace(fallback or "smallinfofont", size)
+    return Font:getFace(fallback or "cfont", size)
 end
 
 --- KOReader font-menu entries: face names and display labels.
@@ -347,12 +376,19 @@ function Settings.setPureBlack(enabled)
     write(KEY_PURE_BLACK, enabled and true or false)
 end
 
---- Secondary / unselected text. Pure black mode uses solid black.
+--- Secondary text. Kobold uses a dark gray (0x22), darker than COLOR_DARK_GRAY.
+-- Pure black mode uses solid black.
 function Settings.getMutedFg()
     if Settings.getPureBlack() then
         return Blitbuffer.COLOR_BLACK
     end
-    return Blitbuffer.COLOR_GRAY_3
+    local ok, color = pcall(function()
+        return Blitbuffer.Color8(0x22)
+    end)
+    if ok and color then
+        return color
+    end
+    return Blitbuffer.COLOR_DARK_GRAY
 end
 
 --- Disabled option text.
@@ -368,7 +404,7 @@ function Settings.getSeparatorFg()
     if Settings.getPureBlack() then
         return Blitbuffer.COLOR_BLACK
     end
-    return Blitbuffer.COLOR_GRAY
+    return Blitbuffer.COLOR_LIGHT_GRAY
 end
 
 --- Tab / section divider rule under the tab bar.
@@ -376,7 +412,7 @@ function Settings.getRuleFg()
     if Settings.getPureBlack() then
         return Blitbuffer.COLOR_BLACK
     end
-    return Blitbuffer.COLOR_GRAY_5
+    return Blitbuffer.COLOR_LIGHT_GRAY
 end
 
 --- Scrollbar ink.
@@ -395,24 +431,30 @@ function Settings.getToggleFg()
     return Blitbuffer.COLOR_DARK_GRAY
 end
 
---- Category zebra stripe (disabled in pure black for max contrast).
+--- Row background. White, including the old zebra stripe, so rows match Kobold.
 function Settings.getStripeBg()
-    if Settings.getPureBlack() then
-        return Blitbuffer.COLOR_WHITE
-    end
-    return Blitbuffer.COLOR_GRAY_E
+    return Blitbuffer.COLOR_WHITE
 end
 
 -- Back-compat alias used by older call sites.
 Settings.UNSELECTED_FG = Blitbuffer.COLOR_GRAY_3
 
---- Remove all Modern Menu preference keys so getters return defaults.
+--- Write the current defaults, including Kobold's Noto Sans when it is installed.
 function Settings.resetToDefaults()
-    for _, key in ipairs(ALL_KEYS) do
-        del(key)
-    end
-    if G_reader_settings then
-        G_reader_settings:flush()
+    Settings.setTabIconsOnly(false)
+    Settings.setTabFontSize(Settings.DEFAULT_TAB_FONT_SIZE)
+    Settings.setTabIconSize(Settings.DEFAULT_TAB_ICON_SIZE)
+    Settings.setOptionFontSize(Settings.DEFAULT_OPTION_FONT_SIZE)
+    Settings.setOptionPadding(Settings.DEFAULT_OPTION_PADDING)
+    Settings.setPureBlack(false)
+    Settings.setMenuHeightPercent(Settings.DEFAULT_MENU_HEIGHT_PERCENT)
+    Settings.setMenuHeightMode(Settings.MENU_HEIGHT_CONTENT)
+    Settings.setDefaultTabId(nil)
+    local font = Settings.defaultMenuFont()
+    if font then
+        Settings.setMenuFont(font)
+    else
+        Settings.setMenuFont(nil)
     end
 end
 

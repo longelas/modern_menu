@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.8.0 — 2026-10-15
+
+Modern Menu now complements [Kobold](https://github.com/unitreign/kobold): the same type and spacing, and a menu that stays available on Kobold’s screens.
+
+### Changes
+- The pull-down menu opens on the file browser and on Kobold’s Home, My Books, and More screens, including after you open Kobold from the reader
+- A **Kobold** tab, when that plugin is installed, sits after any quick-action tabs and before Library, and opens Kobold Home
+- The file-browser shortcut row is pinned at the bottom of the menu, the same way the reader shortcut row is
+- Header aligned with the clock: title on the same inset, close with the status icons, back only inside a submenu
+- Dialogs opened from the menu stay on top of it. Battery, Wi‑Fi, brightness, and Kobold navigation close the menu first
+- Tab icons are centered on their labels and evenly spaced. The selected tab is bold, without an underline, and the labels sit clear of the rule below them
+- Defaults match a compact Kobold-style sheet: option padding −4, tab label 12, tab icon 20, height fit to content, and Noto Sans when KOReader includes that face
+- Tab label size can go down to 8 and tab icon size down to 10. **Reset to defaults** writes these values
+
 ## 1.7.0 — 2026-10-14
 
 Shortcuts Toolbar custom actions run from this menu, and the file-browser status bar is optional.

@@ -1,6 +1,5 @@
 --[[--
-Kobo-style menu row: inset content, one hairline between options.
-Category groups alternate white / light gray (zebra striping).
+Menu row: white, inset like Kobold, one light-gray rule under each option.
 @module modern_menu.widgets.menu_item_card
 --]]
 
@@ -15,7 +14,6 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local RightContainer = require("ui/widget/container/rightcontainer")
-local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local Device = require("device")
@@ -90,13 +88,13 @@ end
 
 function MenuItemCard:init()
     local item = self.item or {}
-    local side_margin = self.side_margin or Screen:scaleBySize(28)
+    local side_margin = self.side_margin or Screen:scaleBySize(30)
     self.width = self.width or Screen:getWidth()
     local option_font = Settings.getOptionFontSize()
     local v_pad_raw = Settings.getOptionPaddingPx()
     -- FrameContainer padding must stay >= 0; negative settings shrink min row height.
     local v_pad = math.max(0, v_pad_raw)
-    local base_min = Screen:scaleBySize(44)
+    local base_min = Screen:scaleBySize(56)
     local min_h
     if v_pad_raw >= 0 then
         min_h = math.max(base_min, option_font + v_pad * 2)
@@ -223,7 +221,7 @@ function MenuItemCard:init()
                     background = Settings.getSeparatorFg(),
                     dimen = Geom:new{
                         w = inner_w,
-                        h = Size.line.thin,
+                        h = Screen:scaleBySize(2),
                     },
                 },
             },
