@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.0 — 2026-10-20
+
+The status bar can be hidden, and the battery can show as a percentage.
+
+### Changes
+- **Hide status bar** removes the clock, contrast, Wi-Fi, and battery row from the menu. The close mark moves to the title row
+- **Battery as percentage** shows the charge as a number instead of the battery icon, in the menu and in the file browser
+
 ## 1.8.0 — 2026-10-15
 
 Modern Menu now complements [Kobold](https://github.com/unitreign/kobold): the same type and spacing, and a menu that stays available on Kobold’s screens.

@@ -6,6 +6,7 @@ Exposes TouchMenu-compatible closeMenu()/updateItems() for menu callbacks.
 @module modern_menu.ui.menu_shell
 --]]
 
+local BD = require("ui/bidi")
 local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
@@ -15,11 +16,13 @@ local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
+local IconWidget = require("ui/widget/iconwidget")
 local Input = Device.input
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local OverlapGroup = require("ui/widget/overlapgroup")
+local RightContainer = require("ui/widget/container/rightcontainer")
 local ScrollableContainer = require("ui/widget/container/scrollablecontainer")
 local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
@@ -127,7 +130,8 @@ function ModernMenuShell:init()
     self.list_content_w = content_w - self.scrollbar_gutter
 
     -- Title row. Close lives in the status bar, top right, with the other
-    -- status icons. The back chevron is only here once a submenu is open,
+    -- status icons. When that bar is hidden, the same close mark sits on the
+    -- right of this row. The back chevron is only here once a submenu is open,
     -- and it uses the same type as the title so it sits on the baseline.
     self._back_icon = TextWidget:new{
         text = "‹",
@@ -167,6 +171,64 @@ function ModernMenuShell:init()
             self.breadcrumb,
         },
     }
+    -- Close sits on this row only while the status bar is hidden. The slot
+    -- stays in the overlap so showing it does not rebuild the header.
+    local header_inner_w = math.max(0, content_w - chrome_edge_pad * 2)
+    self._header_inner_w = header_inner_w
+    self._close_size = Screen:scaleBySize(16)
+    local close_icon
+    local ok_close, close_widget = pcall(function()
+        return IconWidget:new{
+            icon = "close",
+            width = self._close_size,
+            height = self._close_size,
+            alpha = true,
+        }
+    end)
+    if ok_close and close_widget then
+        close_icon = close_widget
+    else
+        close_icon = TextWidget:new{
+            text = "×",
+            face = Settings.face(18, "cfont"),
+            fgcolor = Blitbuffer.COLOR_BLACK,
+        }
+    end
+    local close_size = close_icon:getSize()
+    self._close_w = close_size and close_size.w or self._close_size
+    self._close_icon = CenterContainer:new{
+        dimen = Geom:new{
+            w = self._close_w,
+            h = chrome_btn_h,
+        },
+        close_icon,
+    }
+    self._close_placeholder = HorizontalSpan:new{ width = 0 }
+    self._close_zone = chrome_edge_pad + self._close_w + chrome_gap + Screen:scaleBySize(8)
+    self._header_close_slot = RightContainer:new{
+        dimen = Geom:new{
+            w = header_inner_w,
+            h = chrome_btn_h,
+        },
+        self._close_placeholder,
+    }
+    -- Title and close each span the row, the same way the clock and the
+    -- status icons do, so a right-to-left layout keeps them apart.
+    self.header_overlap = OverlapGroup:new{
+        dimen = Geom:new{
+            w = header_inner_w,
+            h = chrome_btn_h,
+        },
+        allow_mirroring = false,
+        LeftContainer:new{
+            dimen = Geom:new{
+                w = header_inner_w,
+                h = chrome_btn_h,
+            },
+            self.header_row,
+        },
+        self._header_close_slot,
+    }
     self.header = FrameContainer:new{
         bordersize = 0,
         padding_top = Screen:scaleBySize(2),
@@ -176,9 +238,8 @@ function ModernMenuShell:init()
         margin = 0,
         background = Blitbuffer.COLOR_WHITE,
         width = content_w,
-        self.header_row,
+        self.header_overlap,
     }
-    self:_applyChromeFont()
 
     self.tab_defs = self:_buildTabDefs()
     self.tab_bar = TabBar:new{
@@ -240,7 +301,12 @@ function ModernMenuShell:init()
         end,
         show_close = true,
     }
-    self.status_h = self.status_bar.height
+    self._status_hidden = Settings.getHideStatusBar()
+    self.status_h = self._status_hidden and 0 or self.status_bar.height
+    self._status_spacer = VerticalSpan:new{ width = 0 }
+    if self._status_hidden and self.status_bar._unscheduleClock then
+        self.status_bar:_unscheduleClock()
+    end
 
     -- Fixed list viewport under chrome; scroll when items overflow
     local header_h = chrome_btn_h + Screen:scaleBySize(4)
@@ -330,7 +396,7 @@ function ModernMenuShell:init()
         height = self.dimen.h,
         VerticalGroup:new{
             align = "left",
-            self.status_bar,
+            self._status_hidden and self._status_spacer or self.status_bar,
             self.header,
             self.tab_bar,
             self.tab_rule,
@@ -341,13 +407,13 @@ function ModernMenuShell:init()
         },
     }
 
-    -- Wide hit target for the back chevron. Close is a status-bar icon.
+    -- Wide hit target for the back chevron. Close is a status-bar icon,
+    -- or the right side of this row when the bar is hidden.
     local chrome_zone = chrome_edge_pad + back_w + chrome_gap + Screen:scaleBySize(16)
     self._chrome_zone = chrome_zone
-    local chrome_top = self.status_h or 0
     self.chrome_h = header_h
     local chrome_dimen = Geom:new{
-        x = 0, y = chrome_top,
+        x = 0, y = self.status_h or 0,
         w = self.dimen.w,
         h = self.chrome_h,
     }
@@ -368,10 +434,24 @@ function ModernMenuShell:init()
         if not ges or not ges.pos then
             return false
         end
-        if ges.pos.y < chrome_top or ges.pos.y > chrome_top + self.chrome_h then
+        local top = self.status_h or 0
+        if ges.pos.y < top or ges.pos.y > top + self.chrome_h then
             return false
         end
-        if #self.item_table_stack > 0 and ges.pos.x <= chrome_zone then
+        if self._status_hidden and self._close_zone then
+            -- RightContainer parks the mark on the end side.
+            local on_close
+            if BD.mirroredUILayout() then
+                on_close = ges.pos.x <= self._close_zone
+            else
+                on_close = ges.pos.x >= self.dimen.w - self._close_zone
+            end
+            if on_close then
+                self:closeMenu()
+                return true
+            end
+        end
+        if #self.item_table_stack > 0 and ges.pos.x <= self._chrome_zone then
             self:backToUpperMenu()
             return true
         end
@@ -422,6 +502,7 @@ function ModernMenuShell:init()
         self.panel,
     }
 
+    self:_syncStatusBar()
     self:_rebuildContent()
 
     if Device:hasKeys() then
@@ -768,6 +849,56 @@ function ModernMenuShell:refreshQuickMenu()
     self:_dirtyMenu()
 end
 
+function ModernMenuShell:_applyHeaderClose()
+    if not self._header_close_slot then
+        return
+    end
+    if self._status_hidden then
+        self._header_close_slot[1] = self._close_icon
+    else
+        self._header_close_slot[1] = self._close_placeholder
+    end
+    if self._header_close_slot.resetLayout then
+        self._header_close_slot:resetLayout()
+    end
+    if self.header_overlap and self.header_overlap.resetLayout then
+        self.header_overlap:resetLayout()
+    end
+end
+
+--- Show or drop the status bar without rebuilding the rest of the shell.
+-- The close mark moves to the title row while the bar is hidden.
+function ModernMenuShell:_syncStatusBar()
+    local hide = Settings.getHideStatusBar()
+    self._status_hidden = hide
+    local column = self.panel and self.panel[1]
+    if hide then
+        if self.status_bar and self.status_bar._unscheduleClock then
+            self.status_bar:_unscheduleClock()
+        end
+        self.status_h = 0
+        if column and self._status_spacer then
+            column[1] = self._status_spacer
+        end
+    elseif self.status_bar then
+        self.status_h = self.status_bar.height or 0
+        if column then
+            column[1] = self.status_bar
+        end
+        if not self.status_bar._clock_action and self.status_bar._scheduleClock then
+            self.status_bar:_scheduleClock()
+        end
+        if self.status_bar.refresh then
+            self.status_bar:refresh()
+        end
+    end
+    if self.chrome_hit and self.chrome_hit.dimen then
+        self.chrome_hit.dimen.y = self.status_h or 0
+    end
+    self:_applyHeaderClose()
+    self:_applyChromeFont()
+end
+
 function ModernMenuShell:_applyChromeFont()
     -- The chevron belongs to a submenu. The root title starts at the left inset.
     if not self.header_row then
@@ -779,15 +910,27 @@ function ModernMenuShell:_applyChromeFont()
         self.header_row[2].width = nested and (self._chrome_gap or 0) or 0
     end
     -- The title slot grows into the chevron's space while the menu is at its root.
+    -- A header close mark reserves the right side while the status bar is hidden.
     local title_slot = self.header_row[3]
     if title_slot and title_slot.dimen and self._title_w then
         local extra = nested and 0 or ((self._chrome_icon_px or 0) + (self._chrome_gap or 0))
-        title_slot.dimen.w = self._title_w + extra
+        local close_reserve = 0
+        if self._status_hidden then
+            close_reserve = (self._close_w or 0) + (self._chrome_gap or 0)
+        end
+        local title_w = math.max(0, self._title_w + extra - close_reserve)
+        title_slot.dimen.w = title_w
+        if self.breadcrumb then
+            self.breadcrumb.width = title_w
+        end
     end
     -- The row caches its offsets. Without this, the title stays where it
     -- was at the root and draws underneath the chevron.
     if self.header_row.resetLayout then
         self.header_row:resetLayout()
+    end
+    if self.header_overlap and self.header_overlap.resetLayout then
+        self.header_overlap:resetLayout()
     end
 end
 
@@ -810,10 +953,7 @@ function ModernMenuShell:refresh()
     if self.tab_rule_line then
         self.tab_rule_line.background = Settings.getRuleFg()
     end
-    self:_applyChromeFont()
-    if self.status_bar and self.status_bar.refresh then
-        self.status_bar:refresh()
-    end
+    self:_syncStatusBar()
     self:_rebuildContent()
     self:_dirtyMenu()
 end
@@ -874,6 +1014,11 @@ end
 function ModernMenuShell:onCloseWidget()
     if self.status_bar and self.status_bar._unscheduleClock then
         self.status_bar:_unscheduleClock()
+    end
+    -- A hidden bar is not in the panel, so the shell's free walk would miss it.
+    if self._status_hidden and self.status_bar and self.status_bar.free then
+        self.status_bar:free()
+        self.status_bar = nil
     end
 end
 

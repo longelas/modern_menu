@@ -20,6 +20,8 @@ local KEY_MENU_FONT = "modern_menu_font"
 local KEY_DEFAULT_TAB = "modern_menu_default_tab"
 local KEY_MENU_HEIGHT_MODE = "modern_menu_height_mode"
 local KEY_MENU_HEIGHT_PERCENT = "modern_menu_height_percent"
+local KEY_HIDE_STATUS_BAR = "modern_menu_hide_status_bar"
+local KEY_BATTERY_PERCENT = "modern_menu_battery_percent"
 
 -- Defaults tuned for a compact header. The minimums sit below those
 -- defaults so a smaller label or icon can still be chosen.
@@ -368,6 +370,22 @@ function Settings.fontChoices()
     return faces, labels
 end
 
+function Settings.getHideStatusBar()
+    return read(KEY_HIDE_STATUS_BAR, false) and true or false
+end
+
+function Settings.setHideStatusBar(enabled)
+    write(KEY_HIDE_STATUS_BAR, enabled and true or false)
+end
+
+function Settings.getBatteryPercent()
+    return read(KEY_BATTERY_PERCENT, false) and true or false
+end
+
+function Settings.setBatteryPercent(enabled)
+    write(KEY_BATTERY_PERCENT, enabled and true or false)
+end
+
 function Settings.getPureBlack()
     return read(KEY_PURE_BLACK, false) and true or false
 end
@@ -447,6 +465,8 @@ function Settings.resetToDefaults()
     Settings.setOptionFontSize(Settings.DEFAULT_OPTION_FONT_SIZE)
     Settings.setOptionPadding(Settings.DEFAULT_OPTION_PADDING)
     Settings.setPureBlack(false)
+    Settings.setHideStatusBar(false)
+    Settings.setBatteryPercent(false)
     Settings.setMenuHeightPercent(Settings.DEFAULT_MENU_HEIGHT_PERCENT)
     Settings.setMenuHeightMode(Settings.MENU_HEIGHT_CONTENT)
     Settings.setDefaultTabId(nil)

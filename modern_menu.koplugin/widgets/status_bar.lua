@@ -1,6 +1,7 @@
 --[[--
 Top status bar matched to Kobold: time on the left, then contrast, Wi-Fi,
-and a battery icon. The file-browser copy is off until enabled in settings.
+and a battery icon or percentage. The file-browser copy is off until enabled
+in settings. The menu copy can be hidden entirely.
 @module modern_menu.widgets.status_bar
 --]]
 
@@ -207,7 +208,43 @@ function StatusBar:_koIcon(name, id)
     return self:_iconBox(icon, id)
 end
 
+function StatusBar:_batteryLabel()
+    local cap = self:_batteryCapacity()
+    if not cap then
+        return "--"
+    end
+    return string.format("%d%%", cap)
+end
+
 function StatusBar:_batteryIcon()
+    self._battery_glyph = nil
+    self._battery_text = nil
+    if Settings.getBatteryPercent() then
+        -- Hold the width of "100%" so a minute tick from 9% to 10% does not
+        -- shift the icons beside it.
+        local face = Settings.face(16, "cfont")
+        local widest = TextWidget:new{
+            text = "100%",
+            face = face,
+            fgcolor = Blitbuffer.COLOR_BLACK,
+        }
+        local label = TextWidget:new{
+            text = self:_batteryLabel(),
+            face = face,
+            fgcolor = Blitbuffer.COLOR_BLACK,
+        }
+        local widest_size = widest:getSize()
+        local label_size = label:getSize()
+        local slot = RightContainer:new{
+            dimen = Geom:new{
+                w = widest_size.w,
+                h = math.max(widest_size.h or 0, label_size.h or 0),
+            },
+            label,
+        }
+        self._battery_text = label
+        return self:_iconBox(slot, "battery")
+    end
     -- Kobold draws the battery a bit wider than the other status icons.
     local width = math.floor(self.icon_size * 1.3)
     local glyph = BatteryGlyph:new{
@@ -307,6 +344,9 @@ function StatusBar:_scheduleClock()
         end
         if self._battery_glyph then
             self._battery_glyph.capacity = self:_batteryCapacity()
+        end
+        if self._battery_text and self._battery_text.setText then
+            self._battery_text:setText(self:_batteryLabel())
         end
         local wifi_name = self:_wifiIconName()
         local need_rebuild = self._last_wifi_icon ~= wifi_name

@@ -46,25 +46,25 @@ If you want Nickel-like clarity without giving up KOReader’s depth, this plugi
 
 - Hooks `ui.menu.onShowMenu` so swipe-down / Menu key opens Modern Menu instead of stock TouchMenu  
 - Renders the real `tab_item_table` — every stock and plugin entry still works  
-- Breadcrumbs for nested menus. Back (`‹`) sits with the title inside a submenu; close sits with the status icons  
+- Breadcrumbs for nested menus. Back (`‹`) sits with the title inside a submenu; close sits with the status icons, or on the title row when the status bar is hidden  
 - Tab bar with KOReader `appbar.`* icons. Each icon is centered on its label, the selected tab is bold, and a light rule sits under the row  
 - Light-gray separators between items  
 - Gray toggle switches and vertical scrollbar (no fake horizontal scroll)
 
 ### Status bar (menu + optional file browser)
 
-Shown at the top of the modern menu:
+Shown at the top of the modern menu, unless **Modern Menu → Hide status bar** is on. With the bar hidden, the close mark moves to the title row.
 
 
-| Control        | Action                                                               |
-| -------------- | -------------------------------------------------------------------- |
-| **Time**       | Current time, 12-hour                                                |
-| **Contrast**   | Frontlight panel (devices with a light only)                        |
-| **Wi‑Fi**      | Open KOReader network / Wi‑Fi UI                                     |
-| **Battery**    | Battery icon; opens **Battery statistics** (batterystat plugin)     |
+| Control        | Action                                                                                          |
+| -------------- | ----------------------------------------------------------------------------------------------- |
+| **Time**       | Current time, 12-hour                                                                           |
+| **Contrast**   | Frontlight panel (devices with a light only)                                                   |
+| **Wi‑Fi**      | Open KOReader network / Wi‑Fi UI                                                                |
+| **Battery**    | Battery icon, or a percentage when **Battery as percentage** is on; opens **Battery statistics** |
 
 
-The same bar can sit above the file browser. That is off until **Modern Menu → Status bar in file browser** is enabled.
+The same bar can sit above the file browser. That is off until **Modern Menu → Status bar in file browser** is enabled. **Battery as percentage** applies to that copy too.
 
 
 The status bar is **never** injected into the reader view — use KOReader’s own header/footer settings while reading.
@@ -104,7 +104,7 @@ Remove or disable `modern_menu.koplugin`, then restart KOReader. To go back temp
 
 - **Swipe down** from the top edge still opens the menu; Modern Menu consumes that gesture so stock TouchMenu does not also appear.  
 - **Tap** a row for the usual action; **long-press** where stock supported it (help text, style-tweak details, book-specific CSS editor, etc.).   
-- **Modern Menu → Status bar in file browser** shows the same status bar above the file list. It is off until you turn it on. The menu always keeps its own bar.
+- **Modern Menu → Status bar in file browser** shows the same status bar above the file list. It is off until you turn it on. **Hide status bar** removes the bar from the menu; the close mark then sits on the title row. **Battery as percentage** replaces the battery icon with the charge.
 
 ---
 
@@ -113,7 +113,7 @@ Remove or disable `modern_menu.koplugin`, then restart KOReader. To go back temp
 - Solid borders / high-contrast text  
 - Screen refreshes (`setDirty`) only on real state changes
 
-The status bar uses KOReader’s own icons (contrast, Wi‑Fi, and a drawn battery). Spare [Lucide](https://lucide.dev/) SVGs remain under `icons/` (ISC); see `[modern_menu.koplugin/icons/NOTICE](modern_menu.koplugin/icons/NOTICE)`.
+The status bar uses KOReader’s own icons (contrast, Wi‑Fi, and a drawn battery, or a percentage). Spare [Lucide](https://lucide.dev/) SVGs remain under `icons/` (ISC); see `[modern_menu.koplugin/icons/NOTICE](modern_menu.koplugin/icons/NOTICE)`.
 
 ---
 

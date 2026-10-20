@@ -282,6 +282,37 @@ function ModernMenu:addToMainMenu(menu_items)
                 end,
             },
             {
+                text = _("Hide status bar"),
+                checked_func = function()
+                    return Settings.getHideStatusBar()
+                end,
+                keep_menu_open = true,
+                callback = function(touchmenu_instance)
+                    Settings.setHideStatusBar(not Settings.getHideStatusBar())
+                    if touchmenu_instance then
+                        touchmenu_instance:updateItems()
+                    end
+                end,
+            },
+            {
+                text = _("Battery as percentage"),
+                checked_func = function()
+                    return Settings.getBatteryPercent()
+                end,
+                keep_menu_open = true,
+                callback = function(touchmenu_instance)
+                    Settings.setBatteryPercent(not Settings.getBatteryPercent())
+                    if touchmenu_instance then
+                        touchmenu_instance:updateItems()
+                    end
+                    -- The file-browser bar is a separate widget. Refresh it
+                    -- now so the icon and the percentage do not wait on Wi-Fi.
+                    if self.status_bar and self.status_bar.refresh then
+                        self.status_bar:refresh()
+                    end
+                end,
+            },
+            {
                 text_func = function()
                     local name = Settings.getMenuFont()
                     if not name then
