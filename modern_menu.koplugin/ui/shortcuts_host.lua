@@ -538,8 +538,9 @@ function ShortcutsHost.build(menu)
         show_back_button = in_reader and cfg.show_back_button ~= false,
     }
     local ok_bar, bar = pcall(HomeContent.createHomeContent, menu, bar_cfg, function()
+        menu._shortcuts_stale = true
         if menu.refresh then
-            menu:refresh()
+            menu:refresh("content")
         end
     end)
     if not ok_bar or not bar then

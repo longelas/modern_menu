@@ -291,21 +291,14 @@ function ModernMenuShell:init()
         VerticalSpan:new{ width = Screen:scaleBySize(6) },
     }
 
-    self.status_bar = StatusBar.make{
-        ui = self.ui,
-        show_parent = dirty_parent,
-        width = content_w,
-        side_margin = self.side_margin,
-        on_dismiss = function()
-            self:closeMenu()
-        end,
-        show_close = true,
-    }
+    -- A hidden bar is not built until the setting is turned back on.
     self._status_hidden = Settings.getHideStatusBar()
-    self.status_h = self._status_hidden and 0 or self.status_bar.height
+    self._status_battery_mode = Settings.getBatteryPercent()
     self._status_spacer = VerticalSpan:new{ width = 0 }
-    if self._status_hidden and self.status_bar._unscheduleClock then
-        self.status_bar:_unscheduleClock()
+    self.status_h = 0
+    if not self._status_hidden then
+        self.status_bar = self:_makeStatusBar()
+        self.status_h = self.status_bar.height or 0
     end
 
     -- Fixed list viewport under chrome; scroll when items overflow
@@ -502,8 +495,14 @@ function ModernMenuShell:init()
         self.panel,
     }
 
-    self:_syncStatusBar()
-    self:_rebuildContent()
+    self._layout_sig = self:_layoutSignature()
+    self._status_sig = self:_statusSignature()
+    self:_applyHeaderClose()
+    self:_applyChromeFont()
+    self:_rebuildContent({ reset_scroll = true })
+    self._painted_sheet_h = self._sheet_h
+    self:_installScrollCoalesce()
+    self._ready = true
 
     if Device:hasKeys() then
         self.key_events = {
@@ -688,17 +687,420 @@ function ModernMenuShell:_applySheetHeight(footer_h)
     end
 end
 
-function ModernMenuShell:_dirtyMenu()
-    -- A short sheet must repaint the app underneath the area it no longer covers.
-    if Settings.getMenuHeightMode() == Settings.MENU_HEIGHT_FULL then
-        UIManager:setDirty(self:_dirtyTarget(), "ui")
-    else
-        UIManager:setDirty("all", "ui")
+function ModernMenuShell:_layoutSignature()
+    return table.concat({
+        tostring(Settings.getTabFontSize()),
+        Settings.getTabIconsOnly() and "1" or "0",
+        tostring(Settings.getTabIconPx()),
+        tostring(Settings.getOptionFontSize()),
+        tostring(Settings.getOptionPadding()),
+        Settings.getPureBlack() and "1" or "0",
+        Settings.getMenuFont() or "",
+        Settings.getMenuHeightMode(),
+        tostring(Settings.getMenuHeightPercent()),
+    }, "|")
+end
+
+function ModernMenuShell:_statusSignature()
+    return (Settings.getHideStatusBar() and "1" or "0")
+        .. (Settings.getBatteryPercent() and "1" or "0")
+end
+
+function ModernMenuShell:_makeStatusBar()
+    return StatusBar.make{
+        ui = self.ui,
+        show_parent = self:_dirtyTarget(),
+        width = self.dimen.w,
+        side_margin = self.side_margin,
+        on_dismiss = function()
+            self:closeMenu()
+        end,
+        show_close = true,
+    }
+end
+
+function ModernMenuShell:_detach(group, widget)
+    if not group or not widget then
+        return
+    end
+    for i = #group, 1, -1 do
+        if group[i] == widget then
+            table.remove(group, i)
+        end
     end
 end
 
-function ModernMenuShell:_rebuildContent()
+function ModernMenuShell:_listViewport(footer_h)
+    footer_h = footer_h or 0
+    local screen_h = (self.dimen and self.dimen.h) or Screen:getHeight()
+    local chrome_h = self:_chromeHeight()
+    local mode = Settings.getMenuHeightMode()
+    local edge_h = 0
+    if mode ~= Settings.MENU_HEIGHT_FULL then
+        edge_h = (self._sheet_edge_gap or 0) + (self._sheet_edge_h or 0)
+    end
+    local min_list = Screen:scaleBySize(mode == Settings.MENU_HEIGHT_FULL and 120 or 80)
+    local max_list = math.max(min_list, screen_h - chrome_h - footer_h - edge_h)
+    if mode == Settings.MENU_HEIGHT_PERCENT then
+        local sheet = math.floor(screen_h * Settings.getMenuHeightPercent() / 100)
+        sheet = math.max(chrome_h + min_list + edge_h, math.min(screen_h, sheet))
+        return math.max(min_list, sheet - chrome_h - footer_h - edge_h)
+    end
+    return max_list
+end
+
+function ModernMenuShell:_rowEstimate(with_separator)
+    local key = self._layout_sig or ""
+    if self._est_key ~= key then
+        self._est_key = key
+        self._est_plain = nil
+        self._est_sep = nil
+    end
+    if with_separator and self._est_sep then
+        return self._est_sep
+    end
+    if not with_separator and self._est_plain then
+        return self._est_plain
+    end
+    local card = MenuItemCard:new{
+        item = { text = "Ag" },
+        width = self.list_content_w or (self.dimen and self.dimen.w) or Screen:getWidth(),
+        side_margin = self.side_margin,
+        show_separator = with_separator and true or false,
+        stripe = 0,
+    }
+    local height = card:getSize().h
+    if card.free then
+        card:free()
+    end
+    if with_separator then
+        self._est_sep = height
+    else
+        self._est_plain = height
+    end
+    return height
+end
+
+function ModernMenuShell:_fillList(items, width, dirty_parent, viewport_h, scroll_y)
     self:_clearGroup(self.list_group)
+    self._cards = {}
+    self._showing_panel = false
+    local n = #items
+    -- Heights belong to one item table. A different submenu must not reuse them.
+    self._height_cache = self._height_cache or {}
+    local owner = self.item_table or items
+    local cache = self._height_cache[owner]
+    local head = items[1]
+    if not cache or cache.n ~= n or cache.head ~= head then
+        cache = { n = n, head = head }
+        self._height_cache[owner] = cache
+    end
+    self._row_heights = cache
+    if n == 0 then
+        table.insert(self.list_group, self:_emptyNotice(_("No items in this menu.")))
+        self._windowed = false
+        self._built_items = {}
+        return
+    end
+    local function row_h(index)
+        return self._row_heights[index] or self:_rowEstimate(index < n)
+    end
+    local total = 0
+    for i = 1, n do
+        total = total + row_h(i)
+    end
+    viewport_h = math.max(1, viewport_h or total)
+    scroll_y = math.max(0, scroll_y or 0)
+    local first, last = 1, n
+    local windowed = total > viewport_h + 1
+    if windowed then
+        local buffer = viewport_h
+        local y = 0
+        for i = 1, n do
+            local h = row_h(i)
+            if y + h > scroll_y - buffer then
+                first = i
+                break
+            end
+            y = y + h
+        end
+        local limit = scroll_y + viewport_h + buffer
+        local acc = 0
+        for i = 1, n do
+            acc = acc + row_h(i)
+            last = i
+            if acc >= limit then
+                break
+            end
+        end
+        if last < first then
+            last = first
+        end
+    end
+    local top = 0
+    for i = 1, first - 1 do
+        top = top + row_h(i)
+    end
+    if top > 0 then
+        table.insert(self.list_group, VerticalSpan:new{ width = top })
+    end
+    local stripe = 0
+    for i = 1, first - 1 do
+        if items[i].separator then
+            stripe = 1 - stripe
+        end
+    end
+    for i = first, last do
+        local card = MenuItemCard:new{
+            item = items[i],
+            width = width,
+            side_margin = self.side_margin,
+            show_parent = dirty_parent,
+            menu = self,
+            index = i,
+            show_separator = i < n,
+            stripe = stripe,
+        }
+        table.insert(self.list_group, card)
+        self._cards[#self._cards + 1] = card
+        local size = card:getSize()
+        self._row_heights[i] = size and size.h or row_h(i)
+        if items[i].separator then
+            stripe = 1 - stripe
+        end
+    end
+    local bottom = 0
+    for i = last + 1, n do
+        bottom = bottom + row_h(i)
+    end
+    if bottom > 0 then
+        table.insert(self.list_group, VerticalSpan:new{ width = bottom })
+    end
+    local shown = 0
+    for i = first, last do
+        shown = shown + (self._row_heights[i] or 0)
+    end
+    self._windowed = windowed
+    self._win_y0 = top
+    self._win_y1 = top + shown
+    local built = {}
+    for i = 1, n do
+        built[i] = items[i]
+    end
+    self._built_items = built
+end
+
+function ModernMenuShell:_windowCovers()
+    if not self._windowed then
+        return true
+    end
+    local sc = self.scroll_container
+    local y = (sc and sc._scroll_offset_y) or 0
+    local view = (sc and sc.dimen and sc.dimen.h) or 0
+    local y0 = self._win_y0 or 0
+    local y1 = self._win_y1 or 0
+    return y >= y0 - 1 and (y + view) <= y1 + 1
+end
+
+function ModernMenuShell:_ensureListWindow()
+    if self._in_window or not self._windowed or self._showing_panel then
+        return
+    end
+    if self:_windowCovers() then
+        return
+    end
+    local sc = self.scroll_container
+    if not sc then
+        return
+    end
+    self._in_window = true
+    local items = self:_visibleItems()
+    local width = self.list_content_w or (self.dimen.w - (self.scrollbar_gutter or 0))
+    self:_fillList(items, width, self:_dirtyTarget(), sc.dimen and sc.dimen.h or 0, sc._scroll_offset_y or 0)
+    self:_reflowScroll(true)
+    self._in_window = false
+end
+
+function ModernMenuShell:_reflowScroll(preserve)
+    local sc = self.scroll_container
+    if not sc then
+        return
+    end
+    local y = 0
+    if preserve then
+        y = sc._scroll_offset_y or 0
+    end
+    if sc._bb then
+        sc._bb:free()
+        sc._bb = nil
+    end
+    sc._scroll_offset_x = 0
+    sc._scroll_offset_y = 0
+    sc._v_scroll_bar = nil
+    sc._h_scroll_bar = nil
+    sc._is_scrollable = nil
+    sc._mm_in_reflow = true
+    if sc.initState then
+        sc:initState()
+    end
+    sc._mm_in_reflow = false
+    local max_y = sc._max_scroll_offset_y or 0
+    if y > max_y then
+        y = max_y
+    end
+    if y < 0 then
+        y = 0
+    end
+    sc._scroll_offset_y = y
+    if sc._updateScrollBars then
+        sc:_updateScrollBars()
+    end
+end
+
+function ModernMenuShell:_takeScrollChild(content)
+    local sc = self.scroll_container
+    if not sc then
+        return
+    end
+    local prev = sc[1]
+    if prev and prev ~= content then
+        self:_detach(prev, self.list_group)
+        self:_detach(prev, self._shortcuts_bar)
+        if prev ~= self.list_group and prev.free then
+            prev:free()
+        end
+    end
+    sc[1] = content
+end
+
+function ModernMenuShell:_shortcutKey()
+    return tostring(self.last_index) .. ":" .. (self._shortcut_pick and "1" or "0")
+end
+
+function ModernMenuShell:_footerShortcuts()
+    local key = self:_shortcutKey()
+    if self._shortcuts_bar and not self._shortcuts_stale and self._shortcut_key == key then
+        return self._shortcuts_bar
+    end
+    if self._shortcuts_bar and self._shortcuts_bar.free then
+        self._shortcuts_bar:free()
+    end
+    self._shortcuts_bar = nil
+    self._shortcuts_stale = nil
+    local ok_sc, sc_result = pcall(function()
+        return ShortcutsHost.build(self)
+    end)
+    if not ok_sc then
+        logger.warn("modern_menu: shortcuts toolbar host failed: " .. tostring(sc_result))
+        self._shortcut_key = nil
+        return nil
+    end
+    self._shortcuts_bar = sc_result
+    self._shortcut_key = key
+    return sc_result
+end
+
+function ModernMenuShell:_sameBuiltItems()
+    if self._showing_panel or not self._built_items then
+        return false
+    end
+    local items = self:_visibleItems()
+    local built = self._built_items
+    if #built ~= #items then
+        return false
+    end
+    for i = 1, #items do
+        if built[i] ~= items[i] then
+            return false
+        end
+    end
+    return true
+end
+
+function ModernMenuShell:_refreshVisibleRows()
+    for _, card in ipairs(self._cards or {}) do
+        if card.updateState then
+            card:updateState()
+        end
+    end
+end
+
+function ModernMenuShell:_dirtyRows()
+    local target = self:_dirtyTarget()
+    local sc = self.scroll_container
+    local view = sc and sc.dimen
+    local painted = false
+    for _, card in ipairs(self._cards or {}) do
+        local region = card.dimen
+        local on_screen = region and view and region.w and region.h and region.w > 0
+            and region.y and view.y
+            and region.y + region.h > view.y
+            and region.y < view.y + view.h
+        if on_screen then
+            UIManager:setDirty(target, "ui", region)
+            painted = true
+        end
+    end
+    if not painted then
+        UIManager:setDirty(target, "ui")
+    end
+end
+
+--- KOReader applies a pan on release, one _scrollBy per swipe or page key.
+-- Swallow that paint, build any rows that slid into view, then paint once.
+function ModernMenuShell:_installScrollCoalesce()
+    local sc = self.scroll_container
+    if not sc or sc._mm_coalesce_installed or not sc._scrollBy then
+        return
+    end
+    sc._mm_coalesce_installed = true
+    local shell = self
+    local orig_scroll = sc._scrollBy
+    sc._scrollBy = function(container, dx, dy, ensure_scroll_steps)
+        if container._mm_in_reflow then
+            return orig_scroll(container, dx, dy, ensure_scroll_steps)
+        end
+        local orig_set = UIManager.setDirty
+        local swallowed = false
+        UIManager.setDirty = function(mgr, widget, ...)
+            if widget == container or widget == container.show_parent or widget == "all" then
+                swallowed = true
+                return
+            end
+            return orig_set(mgr, widget, ...)
+        end
+        local ok, err = pcall(orig_scroll, container, dx, dy, ensure_scroll_steps)
+        UIManager.setDirty = orig_set
+        if not ok then
+            error(err)
+        end
+        shell:_ensureListWindow()
+        if swallowed then
+            orig_set(UIManager, container.show_parent or container, function()
+                return "ui", container.dimen
+            end)
+        end
+    end
+end
+
+function ModernMenuShell:_dirtyMenu()
+    -- Repaint the page under the sheet only when that sheet grew or shrank.
+    local mode = Settings.getMenuHeightMode()
+    local sheet = self._sheet_h
+    local previous = self._painted_sheet_h
+    local height_changed = previous ~= nil and sheet ~= previous
+    self._painted_sheet_h = sheet
+    if mode ~= Settings.MENU_HEIGHT_FULL and (height_changed or previous == nil) then
+        UIManager:setDirty("all", "ui")
+        return
+    end
+    UIManager:setDirty(self:_dirtyTarget(), "ui")
+end
+
+function ModernMenuShell:_rebuildContent(opts)
+    opts = opts or {}
+    local reset_scroll = opts.reset_scroll and true or false
+    self:_detach(self.qm_footer_slot, self._shortcuts_bar)
     self:_clearGroup(self.qm_footer_slot)
 
     local panel_widget, footer_widget, panel_err
@@ -732,15 +1134,8 @@ function ModernMenuShell:_rebuildContent()
 
     -- Shortcuts Toolbar paints this row into stock TouchMenu. Pin the same
     -- back button and icons under the reader list when that plugin is on.
-    local shortcuts_bar
-    local ok_sc, sc_result = pcall(function()
-        return ShortcutsHost.build(self)
-    end)
-    if not ok_sc then
-        logger.warn("modern_menu: shortcuts toolbar host failed: " .. tostring(sc_result))
-    else
-        shortcuts_bar = sc_result
-    end
+    -- The row is reused until the tab or the recording session changes.
+    local shortcuts_bar = self:_footerShortcuts()
     if shortcuts_bar and self.qm_footer_slot then
         table.insert(self.qm_footer_slot, LineWidget:new{
             background = Settings.getRuleFg(),
@@ -765,40 +1160,34 @@ function ModernMenuShell:_rebuildContent()
     self._pending_footer_h = footer_h
 
     local content = self.list_group
+    local scroll_y = 0
+    if not reset_scroll and self.scroll_container then
+        scroll_y = self.scroll_container._scroll_offset_y or 0
+    end
+    local viewport_h = self:_listViewport(footer_h)
     if panel_widget then
+        self:_clearGroup(self.list_group)
+        self._cards = nil
+        self._built_items = nil
+        self._windowed = false
+        self._showing_panel = true
         content = panel_widget
     else
+        self._showing_panel = false
         local tab = self.tab_item_table and self.tab_item_table[self.last_index]
         local nested = self.item_table_stack and #self.item_table_stack > 0
         if tab and tab.panel and not nested then
+            self:_clearGroup(self.list_group)
+            self._cards = nil
+            self._built_items = nil
+            self._windowed = false
             table.insert(self.list_group, self:_emptyNotice(QuickMenuHost.failureMessage()))
         else
             local items = self:_visibleItems()
             -- Leave room for the v-scrollbar so content never overflows horizontally
             local width = self.list_content_w or (self.dimen.w - (self.scrollbar_gutter or 0))
             local dirty_parent = self:_dirtyTarget()
-
-            if #items == 0 then
-                table.insert(self.list_group, self:_emptyNotice(_("No items in this menu.")))
-            else
-                -- Alternate white / light-gray by stock category (item.separator ends a group)
-                local stripe = 0
-                for i, item in ipairs(items) do
-                    table.insert(self.list_group, MenuItemCard:new{
-                        item = item,
-                        width = width,
-                        side_margin = self.side_margin,
-                        show_parent = dirty_parent,
-                        menu = self,
-                        index = i,
-                        show_separator = i < #items,
-                        stripe = stripe,
-                    })
-                    if item.separator then
-                        stripe = 1 - stripe
-                    end
-                end
-            end
+            self:_fillList(items, width, dirty_parent, viewport_h, scroll_y)
         end
     end
 
@@ -812,24 +1201,14 @@ function ModernMenuShell:_rebuildContent()
         end
     end
 
-    -- Reset scroll state so the next paint recomputes overflow + scrollbar.
-    -- A live _bb would blit the previous button glyphs over the new panel.
-    self.scroll_container[1] = content
+    -- A live crop buffer would blit the previous glyphs over the new panel.
+    self:_takeScrollChild(content)
     -- Size the sheet after the rows exist so "fit content" can measure them.
     self:_applySheetHeight(self._pending_footer_h or 0)
-    if self.scroll_container.reset then
-        self.scroll_container:reset()
-    else
-        self.scroll_container._scroll_offset_x = 0
-        self.scroll_container._scroll_offset_y = 0
-        if self.scroll_container._bb then
-            self.scroll_container._bb:free()
-            self.scroll_container._bb = nil
-        end
-        self.scroll_container._is_scrollable = nil
+    self:_reflowScroll(not reset_scroll)
+    if self._windowed and not self:_windowCovers() then
+        self:_ensureListWindow()
     end
-    self.scroll_container._v_scroll_bar = nil
-    self.scroll_container._h_scroll_bar = nil
 
     local column = self.panel and self.panel[1]
     if column and column.resetLayout then
@@ -844,9 +1223,17 @@ end
 --- Rebuild the Quick Menu body without reloading tab chrome.
 -- A toggle only needs new button glyphs. Reloading the tab bar first
 -- can paint the shell while those glyphs still show the previous state.
-function ModernMenuShell:refreshQuickMenu()
-    self:_rebuildContent()
-    self:_dirtyMenu()
+function ModernMenuShell:refreshQuickMenu(full)
+    if self._closing then
+        return
+    end
+    self:_rebuildContent({ reset_scroll = false })
+    if full then
+        self._painted_sheet_h = self._sheet_h
+        UIManager:setDirty("all", "full")
+    else
+        self:_dirtyMenu()
+    end
 end
 
 function ModernMenuShell:_applyHeaderClose()
@@ -870,7 +1257,10 @@ end
 -- The close mark moves to the title row while the bar is hidden.
 function ModernMenuShell:_syncStatusBar()
     local hide = Settings.getHideStatusBar()
+    local battery = Settings.getBatteryPercent()
+    local battery_changed = battery ~= self._status_battery_mode
     self._status_hidden = hide
+    self._status_battery_mode = battery
     local column = self.panel and self.panel[1]
     if hide then
         if self.status_bar and self.status_bar._unscheduleClock then
@@ -880,15 +1270,21 @@ function ModernMenuShell:_syncStatusBar()
         if column and self._status_spacer then
             column[1] = self._status_spacer
         end
-    elseif self.status_bar then
+    else
+        local created = self.status_bar == nil
+        if created then
+            self.status_bar = self:_makeStatusBar()
+        end
         self.status_h = self.status_bar.height or 0
         if column then
             column[1] = self.status_bar
         end
-        if not self.status_bar._clock_action and self.status_bar._scheduleClock then
+        if self.status_bar._scheduleClock and not self.status_bar._clock_action then
             self.status_bar:_scheduleClock()
         end
-        if self.status_bar.refresh then
+        -- Clock ticks already edit the text in place. Rebuild icons only
+        -- when the battery presentation actually changes.
+        if battery_changed and not created and self.status_bar.refresh then
             self.status_bar:refresh()
         end
     end
@@ -897,6 +1293,9 @@ function ModernMenuShell:_syncStatusBar()
     end
     self:_applyHeaderClose()
     self:_applyChromeFont()
+    if column and column.resetLayout then
+        column:resetLayout()
+    end
 end
 
 function ModernMenuShell:_applyChromeFont()
@@ -922,6 +1321,9 @@ function ModernMenuShell:_applyChromeFont()
         title_slot.dimen.w = title_w
         if self.breadcrumb then
             self.breadcrumb.width = title_w
+            if self._ready and self.breadcrumb.setCrumbs then
+                self.breadcrumb:setCrumbs(self:_breadcrumbCrumbs())
+            end
         end
     end
     -- The row caches its offsets. Without this, the title stays where it
@@ -934,27 +1336,44 @@ function ModernMenuShell:_applyChromeFont()
     end
 end
 
-function ModernMenuShell:refresh()
+function ModernMenuShell:refresh(reason)
     -- A shortcut tap closes first, then runs the action. Rebuilding here
     -- would free that icon while its handler is still on the stack.
     if self._closing then
         return
     end
-    -- Tab chrome caches sizes at init; reload so tab font/icon settings
-    -- refresh instantly the same way option rows do.
-    if self.tab_bar and self.tab_bar.reloadFromSettings then
-        local old_h = self.tab_bar.height
-        self.tab_bar:reloadFromSettings()
-        local delta = self.tab_bar.height - old_h
-        if delta ~= 0 and self.list_h_base then
-            self.list_h_base = math.max(Screen:scaleBySize(120), self.list_h_base - delta)
+    reason = reason or "nav"
+    if reason == "chrome" then
+        self._row_heights = nil
+        self._height_cache = nil
+        self._est_key = nil
+        self._est_plain = nil
+        self._est_sep = nil
+        -- Tab chrome caches sizes at init; reload so font and icon settings
+        -- refresh immediately. This is the only path that rebuilds tab icons.
+        if self.tab_bar and self.tab_bar.reloadFromSettings then
+            local old_h = self.tab_bar.height
+            self.tab_bar:reloadFromSettings()
+            local delta = self.tab_bar.height - old_h
+            if delta ~= 0 and self.list_h_base then
+                self.list_h_base = math.max(Screen:scaleBySize(120), self.list_h_base - delta)
+            end
         end
+        if self.tab_rule_line then
+            self.tab_rule_line.background = Settings.getRuleFg()
+        end
+        self:_syncStatusBar()
+        self:_rebuildContent({ reset_scroll = false })
+        self:_dirtyMenu()
+        return
     end
-    if self.tab_rule_line then
-        self.tab_rule_line.background = Settings.getRuleFg()
+    if reason == "content" then
+        self:_rebuildContent({ reset_scroll = false })
+        self:_dirtyMenu()
+        return
     end
-    self:_syncStatusBar()
-    self:_rebuildContent()
+    self:_applyChromeFont()
+    self:_rebuildContent({ reset_scroll = true })
     self:_dirtyMenu()
 end
 
@@ -998,6 +1417,7 @@ function ModernMenuShell:closeMenu()
     -- Stock TouchMenu removes it immediately. Freeing the widgets here would
     -- run during the tap, so drop the window now and finish teardown next tick.
     UIManager:nextTick(function()
+        Settings.flushPending()
         if cb then
             cb()
         else
@@ -1023,7 +1443,38 @@ function ModernMenuShell:onCloseWidget()
 end
 
 function ModernMenuShell:updateItems()
-    self:refresh()
+    if self._closing then
+        return
+    end
+    self._did_update = true
+    local layout = self:_layoutSignature()
+    local status = self:_statusSignature()
+    if layout ~= self._layout_sig then
+        self._layout_sig = layout
+        self._status_sig = status
+        self:refresh("chrome")
+        return
+    end
+    if status ~= self._status_sig then
+        self._status_sig = status
+        self:_syncStatusBar()
+        self:_applySheetHeight(self._pending_footer_h or 0)
+        self:_reflowScroll(true)
+        self:_ensureListWindow()
+        if self:_sameBuiltItems() then
+            self:_refreshVisibleRows()
+        else
+            self:_rebuildContent({ reset_scroll = false })
+        end
+        self:_dirtyMenu()
+        return
+    end
+    if self:_sameBuiltItems() then
+        self:_refreshVisibleRows()
+        self:_dirtyRows()
+        return
+    end
+    self:refresh("content")
 end
 
 --- Leave the open book and land in the file browser.
@@ -1044,6 +1495,7 @@ function ModernMenuShell:_goToFileManager()
     local cb = self.close_callback
     self.close_callback = nil
     UIManager:nextTick(function()
+        Settings.flushPending()
         if cb then
             pcall(cb)
         end
@@ -1196,11 +1648,15 @@ function ModernMenuShell:onMenuSelect(item)
     if callback then
         -- Pass our shell as touchmenu_instance (closeMenu / updateItems)
         local stack_n = UIManager._window_stack and #UIManager._window_stack or 0
+        self._did_update = false
         callback(self)
         local opened_dialog = UIManager._window_stack
             and #UIManager._window_stack > stack_n
         if item.checked or item.checked_func then
-            if not (item.check_callback_updates_menu or item.check_callback_closes_menu) then
+            -- The callback may already have called updateItems. A plain
+            -- check only repaints that row; a menu-structure callback still
+            -- goes through updateItems, which rebuilds when the rows changed.
+            if not item.check_callback_closes_menu and not self._closing and not self._did_update then
                 self:updateItems()
             end
         elseif not opened_dialog and not item.keep_menu_open then

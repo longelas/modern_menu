@@ -51,6 +51,10 @@ If you want Nickel-like clarity without giving up KOReader’s depth, this plugi
 - Light-gray separators between items  
 - Gray toggle switches and vertical scrollbar (no fake horizontal scroll)
 
+### Faster on e-ink
+
+A tap updates the row that changed. Tabs, the status bar, and the shortcut row stay as they are. A long list builds the rows on screen, plus a short buffer, instead of the whole menu. When the sheet height has not changed, only that sheet is refreshed.
+
 ### Status bar (menu + optional file browser)
 
 Shown at the top of the modern menu, unless **Modern Menu → Hide status bar** is on. With the bar hidden, the close mark moves to the title row.
@@ -111,7 +115,7 @@ Remove or disable `modern_menu.koplugin`, then restart KOReader. To go back temp
 - No smooth animations or continuous scroll physics  
 - No translucent overlays or drop shadows  
 - Solid borders / high-contrast text  
-- Screen refreshes (`setDirty`) only on real state changes
+- Screen refreshes (`setDirty`) cover the menu or the changed row, and only when something actually changed
 
 The status bar uses KOReader’s own icons (contrast, Wi‑Fi, and a drawn battery, or a percentage). Spare [Lucide](https://lucide.dev/) SVGs remain under `icons/` (ISC); see `[modern_menu.koplugin/icons/NOTICE](modern_menu.koplugin/icons/NOTICE)`.
 

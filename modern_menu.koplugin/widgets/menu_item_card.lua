@@ -86,6 +86,43 @@ local function item_checked(item)
     return item.checked
 end
 
+local function trailing_kind(item, checked)
+    if has_submenu(item) then
+        return "sub"
+    end
+    if checked ~= nil then
+        if item.radio then
+            return checked and "radio-on" or "radio-off"
+        end
+        return checked and "toggle-on" or "toggle-off"
+    end
+    return "none"
+end
+
+local function make_trailing(item, checked, option_font)
+    if has_submenu(item) then
+        return TextWidget:new{
+            text = "›",
+            face = Settings.face(math.max(20, option_font + 4), "cfont"),
+            fgcolor = Settings.getMutedFg(),
+        }
+    end
+    if checked ~= nil then
+        if item.radio then
+            return TextWidget:new{
+                text = checked and "◉" or "○",
+                face = Settings.face(math.max(16, option_font - 1)),
+                fgcolor = Settings.getMutedFg(),
+            }
+        end
+        return ToggleSwitch:new{ checked = checked }
+    end
+    return TextWidget:new{
+        text = "",
+        face = Settings.face(16),
+    }
+end
+
 function MenuItemCard:init()
     local item = self.item or {}
     local side_margin = self.side_margin or Screen:scaleBySize(30)
@@ -106,7 +143,6 @@ function MenuItemCard:init()
     end
     local enabled = item_enabled(item)
     local checked = item_checked(item)
-    local submenu = has_submenu(item)
     local text = item_text(item)
     local fg = enabled and Blitbuffer.COLOR_BLACK or Settings.getDisabledFg()
     local inner_w = self.width - side_margin * 2
@@ -134,37 +170,23 @@ function MenuItemCard:init()
         end
     end
 
+    local title_max = row_w - trailing_w - icon_slot - Screen:scaleBySize(8)
     local title = TextWidget:new{
         text = text,
         face = row_face(item, option_font),
         fgcolor = fg,
-        max_width = row_w - trailing_w - icon_slot - Screen:scaleBySize(8),
+        max_width = title_max,
     }
     table.insert(leading, title)
+    self._leading = leading
+    self._title = title
+    self._title_index = #leading
+    self._title_max = title_max
+    self._option_font = option_font
 
-    local trailing
-    if submenu then
-        trailing = TextWidget:new{
-            text = "›",
-            face = Settings.face(math.max(20, option_font + 4), "cfont"),
-            fgcolor = Settings.getMutedFg(),
-        }
-    elseif checked ~= nil then
-        if item.radio then
-            trailing = TextWidget:new{
-                text = checked and "◉" or "○",
-                face = Settings.face(math.max(16, option_font - 1)),
-                fgcolor = Settings.getMutedFg(),
-            }
-        else
-            trailing = ToggleSwitch:new{ checked = checked }
-        end
-    else
-        trailing = TextWidget:new{
-            text = "",
-            face = Settings.face(16),
-        }
-    end
+    local trailing = make_trailing(item, checked, option_font)
+    self._trailing = trailing
+    self._trailing_kind = trailing_kind(item, checked)
 
     local row = HorizontalGroup:new{
         align = "center",
@@ -183,6 +205,7 @@ function MenuItemCard:init()
             trailing,
         },
     }
+    self._trailing_slot = row[2]
 
     local bg = (self.stripe == 1) and Settings.getStripeBg() or Blitbuffer.COLOR_WHITE
 
@@ -249,6 +272,60 @@ function MenuItemCard:init()
             },
         },
     }
+end
+
+--- Flip a check, radio, or label without rebuilding the row chrome.
+function MenuItemCard:updateState()
+    local item = self.item or {}
+    local option_font = self._option_font or Settings.getOptionFontSize()
+    local enabled = item_enabled(item)
+    local checked = item_checked(item)
+    local text = item_text(item)
+    local fg = enabled and Blitbuffer.COLOR_BLACK or Settings.getDisabledFg()
+    if self._title and (self._title.text ~= text or self._title.fgcolor ~= fg) then
+        local updated = TextWidget:new{
+            text = text,
+            face = row_face(item, option_font),
+            fgcolor = fg,
+            max_width = self._title_max,
+        }
+        if self._leading and self._title_index then
+            self._leading[self._title_index] = updated
+        end
+        if self._title.free then
+            self._title:free()
+        end
+        self._title = updated
+        if self._leading and self._leading.resetLayout then
+            self._leading:resetLayout()
+        end
+    end
+    local kind = trailing_kind(item, checked)
+    if kind ~= self._trailing_kind then
+        local toggle_flip = kind:sub(1, 6) == "toggle" and self._trailing_kind
+            and self._trailing_kind:sub(1, 6) == "toggle"
+        local radio_flip = kind:sub(1, 5) == "radio" and self._trailing_kind
+            and self._trailing_kind:sub(1, 5) == "radio"
+        if toggle_flip and self._trailing then
+            self._trailing.checked = checked and true or false
+        elseif radio_flip and self._trailing and self._trailing.setText then
+            self._trailing:setText(checked and "◉" or "○")
+        else
+            local trailing = make_trailing(item, checked, option_font)
+            if self._trailing and self._trailing.free then
+                self._trailing:free()
+            end
+            self._trailing = trailing
+            if self._trailing_slot then
+                self._trailing_slot[1] = trailing
+                if self._trailing_slot.resetLayout then
+                    self._trailing_slot:resetLayout()
+                end
+            end
+        end
+        self._trailing_kind = kind
+    end
+    self.enabled = enabled
 end
 
 function MenuItemCard:onTapItem(_, ges)

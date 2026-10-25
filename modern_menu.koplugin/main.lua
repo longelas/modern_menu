@@ -1129,6 +1129,17 @@ function ModernMenu:_buildModernMenu(menu_self, tab_index)
     -- or battery screen opened from it would land underneath and stay hidden.
     -- Keep those windows above this one for as long as the menu is open.
     local orig_show = UIManager.show
+    -- Lua functions cannot hold fields. Wrappers share this table so a
+    -- later layer (Neo's sort hook) can be spliced out without keeping
+    -- the open menu alive.
+    local function show_links()
+        local links = UIManager._mm_show_links
+        if not links then
+            links = setmetatable({}, { __mode = "k" })
+            UIManager._mm_show_links = links
+        end
+        return links
+    end
     local function menu_stack_index()
         local stack = UIManager._window_stack
         if not stack then
@@ -1161,7 +1172,8 @@ function ModernMenu:_buildModernMenu(menu_self, tab_index)
         UIManager:setDirty(widget, "ui")
     end
     local function wrapped_show(ui_mgr, widget, ...)
-        orig_show(ui_mgr, widget, ...)
+        local prev = show_links()[wrapped_show].prev
+        prev(ui_mgr, widget, ...)
         if not widget or widget == menu_container or not menu_stack_index() then
             return
         end
@@ -1172,10 +1184,29 @@ function ModernMenu:_buildModernMenu(menu_self, tab_index)
         end
         lift_above_menu(widget)
     end
+    show_links()[wrapped_show] = { prev = orig_show, layer = "menu" }
     UIManager.show = wrapped_show
     local function restore_show()
+        local links = show_links()
         if UIManager.show == wrapped_show then
             UIManager.show = orig_show
+            links[wrapped_show] = nil
+            return
+        end
+        -- A Neo sort wrapper may have been installed on top of this one.
+        -- Splice this layer out so its closure can drop the shell.
+        local current = UIManager.show
+        local guard = 0
+        while type(current) == "function" and guard < 8 do
+            local link = links[current]
+            local prev = link and link.prev
+            if prev == wrapped_show then
+                link.prev = orig_show
+                links[wrapped_show] = nil
+                return
+            end
+            current = prev
+            guard = guard + 1
         end
     end
 

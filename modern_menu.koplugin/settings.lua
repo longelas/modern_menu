@@ -63,13 +63,46 @@ local function read(key, default)
     return value
 end
 
+local flush_scheduled = false
+
+local function schedule_flush()
+    if not G_reader_settings or flush_scheduled then
+        return
+    end
+    flush_scheduled = true
+    -- One disk write per burst of toggles. The menu close path flushes
+    -- again so a quit still keeps the last value.
+    local ok, UIManager = pcall(require, "ui/uimanager")
+    if not ok or not UIManager or not UIManager.nextTick then
+        flush_scheduled = false
+        G_reader_settings:flush()
+        return
+    end
+    UIManager:nextTick(function()
+        if not flush_scheduled then
+            return
+        end
+        flush_scheduled = false
+        if G_reader_settings then
+            G_reader_settings:flush()
+        end
+    end)
+end
+
 local function write(key, value)
     if not G_reader_settings then
         return
     end
-    -- Flush immediately so values survive AppImage/SDL quits that skip a clean exit.
     G_reader_settings:saveSetting(key, value)
-    G_reader_settings:flush()
+    schedule_flush()
+end
+
+--- Write any debounced settings to disk now.
+function Settings.flushPending()
+    flush_scheduled = false
+    if G_reader_settings then
+        G_reader_settings:flush()
+    end
 end
 
 local function del(key)
@@ -246,9 +279,7 @@ end
 function Settings.setDefaultTabId(id)
     if type(id) ~= "string" or id == "" then
         del(KEY_DEFAULT_TAB)
-        if G_reader_settings then
-            G_reader_settings:flush()
-        end
+        schedule_flush()
         return
     end
     write(KEY_DEFAULT_TAB, id)
@@ -293,18 +324,31 @@ end
 --- Face name from KOReader's font menu.
 -- Nil means the stock UI font. An unset preference uses Kobold's Noto Sans.
 function Settings.getMenuFont()
+    if Settings._menu_font_cached then
+        return Settings._menu_font_value
+    end
     local name = read(KEY_MENU_FONT, nil)
+    local value
     if name == nil then
-        return Settings.defaultMenuFont()
+        value = Settings.defaultMenuFont()
+        -- crengine may not be ready yet. Don't pin a nil default.
+        if Settings._default_menu_font == nil then
+            return value
+        end
+    elseif type(name) ~= "string" or name == "" then
+        value = nil
+    else
+        value = name
     end
-    if type(name) ~= "string" or name == "" then
-        return nil
-    end
-    return name
+    Settings._menu_font_cached = true
+    Settings._menu_font_value = value
+    return value
 end
 
 function Settings.setMenuFont(name)
     Settings._font_file = nil
+    Settings._face_cache = nil
+    Settings._menu_font_cached = nil
     if name == nil or type(name) ~= "string" or name == "" then
         -- Explicit stock UI font, distinct from the unset Kobold default.
         write(KEY_MENU_FONT, "")
@@ -340,14 +384,26 @@ end
 
 --- A face at `size`, using the chosen menu font when one is set.
 function Settings.face(size, fallback)
-    local file, index = resolve_menu_font()
-    if file then
-        local face = Font:getFace(file, size, index)
-        if face then
-            return face
-        end
+    fallback = fallback or "cfont"
+    local font_name = Settings.getMenuFont() or ""
+    local key = tostring(size) .. "\0" .. fallback .. "\0" .. font_name
+    local cache = Settings._face_cache
+    if cache and cache[key] then
+        return cache[key]
     end
-    return Font:getFace(fallback or "cfont", size)
+    local file, index = resolve_menu_font()
+    local face
+    if file then
+        face = Font:getFace(file, size, index)
+    end
+    if not face then
+        face = Font:getFace(fallback, size)
+    end
+    if not Settings._face_cache then
+        Settings._face_cache = {}
+    end
+    Settings._face_cache[key] = face
+    return face
 end
 
 --- KOReader font-menu entries: face names and display labels.
@@ -392,61 +448,63 @@ end
 
 function Settings.setPureBlack(enabled)
     write(KEY_PURE_BLACK, enabled and true or false)
+    Settings._palette_cache = nil
+end
+
+local function palette()
+    if Settings._palette_cache then
+        return Settings._palette_cache
+    end
+    local pure = Settings.getPureBlack()
+    local muted = Blitbuffer.COLOR_BLACK
+    if not pure then
+        local ok, color = pcall(function()
+            return Blitbuffer.Color8(0x22)
+        end)
+        muted = (ok and color) or Blitbuffer.COLOR_DARK_GRAY
+    end
+    local ink = pure and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_DARK_GRAY
+    local light = pure and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_LIGHT_GRAY
+    Settings._palette_cache = {
+        muted = muted,
+        disabled = ink,
+        separator = light,
+        rule = light,
+        scrollbar = ink,
+        toggle = ink,
+    }
+    return Settings._palette_cache
 end
 
 --- Secondary text. Kobold uses a dark gray (0x22), darker than COLOR_DARK_GRAY.
 -- Pure black mode uses solid black.
 function Settings.getMutedFg()
-    if Settings.getPureBlack() then
-        return Blitbuffer.COLOR_BLACK
-    end
-    local ok, color = pcall(function()
-        return Blitbuffer.Color8(0x22)
-    end)
-    if ok and color then
-        return color
-    end
-    return Blitbuffer.COLOR_DARK_GRAY
+    return palette().muted
 end
 
 --- Disabled option text.
 function Settings.getDisabledFg()
-    if Settings.getPureBlack() then
-        return Blitbuffer.COLOR_BLACK
-    end
-    return Blitbuffer.COLOR_DARK_GRAY
+    return palette().disabled
 end
 
 --- Hairline separators between options.
 function Settings.getSeparatorFg()
-    if Settings.getPureBlack() then
-        return Blitbuffer.COLOR_BLACK
-    end
-    return Blitbuffer.COLOR_LIGHT_GRAY
+    return palette().separator
 end
 
 --- Tab / section divider rule under the tab bar.
 function Settings.getRuleFg()
-    if Settings.getPureBlack() then
-        return Blitbuffer.COLOR_BLACK
-    end
-    return Blitbuffer.COLOR_LIGHT_GRAY
+    return palette().rule
 end
 
 --- Scrollbar ink.
 function Settings.getScrollbarFg()
-    if Settings.getPureBlack() then
-        return Blitbuffer.COLOR_BLACK
-    end
-    return Blitbuffer.COLOR_DARK_GRAY
+    return palette().scrollbar
 end
 
---- Toggle switch chrome.
+--- Toggle switch chrome. Cached so a paint does not re-read settings.
 function Settings.getToggleFg()
-    if Settings.getPureBlack() then
-        return Blitbuffer.COLOR_BLACK
-    end
-    return Blitbuffer.COLOR_DARK_GRAY
+    return palette().toggle
 end
 
 --- Row background. White, including the old zebra stripe, so rows match Kobold.

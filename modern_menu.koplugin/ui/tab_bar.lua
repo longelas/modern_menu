@@ -13,7 +13,6 @@ local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconWidget = require("ui/widget/iconwidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local TextWidget = require("ui/widget/textwidget")
-local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Device = require("device")
@@ -34,18 +33,30 @@ local TabBar = InputContainer:extend{
     icons_only = nil,
 }
 
+local function free_widget(widget)
+    if widget and widget.free then
+        widget:free()
+    end
+end
+
 function TabBar:_applyLayoutMetrics()
     local gap = self.icons_only and 0 or Screen:scaleBySize(3)
     local label_h = 0
     if not self.icons_only then
         -- Measure the real face, including descenders, so the row is tall
         -- enough and the label does not run into the rule below.
-        local probe = TextWidget:new{
-            text = "Ag",
-            face = Settings.face(self.face_size or Settings.getTabFontSize(), "cfont"),
-            bold = true,
-        }
-        label_h = probe:getSize().h
+        local size_key = tostring(self.face_size)
+        if self._label_h_key ~= size_key then
+            local probe = TextWidget:new{
+                text = "Ag",
+                face = Settings.face(self.face_size or Settings.getTabFontSize(), "cfont"),
+                bold = true,
+            }
+            self._label_h = probe:getSize().h
+            self._label_h_key = size_key
+            free_widget(probe)
+        end
+        label_h = self._label_h or 0
     end
     self.height = self.icon_size + gap + label_h + Screen:scaleBySize(2)
     self.inner_width = math.max(0, self.width - 2 * self.side_margin)
@@ -60,6 +71,7 @@ function TabBar:reloadFromSettings()
     self.icons_only = Settings.getTabIconsOnly()
     self.face_size = Settings.getTabFontSize()
     self.icon_size = Settings.getTabIconPx()
+    self._label_widths = nil
     self:_applyLayoutMetrics()
     self:_rebuildTabs()
 end
@@ -104,6 +116,12 @@ function TabBar:init()
 end
 
 function TabBar:_labelWidth(text, max_width)
+    local key = tostring(text) .. "\0" .. tostring(self.face_size) .. "\0" .. tostring(max_width)
+    self._label_widths = self._label_widths or {}
+    local cached = self._label_widths[key]
+    if cached then
+        return cached
+    end
     local face = Settings.face(self.face_size, "cfont")
     -- Bold is wider. Measure that so selecting a tab does not shift the row.
     local probe = TextWidget:new{
@@ -113,7 +131,10 @@ function TabBar:_labelWidth(text, max_width)
         max_width = max_width,
         truncate_with_ellipsis = true,
     }
-    return probe:getSize().w
+    local width = probe:getSize().w
+    free_widget(probe)
+    self._label_widths[key] = width
+    return width
 end
 
 function TabBar:_rebuildTabs()
@@ -129,6 +150,7 @@ function TabBar:_rebuildTabs()
     local icon_px = math.min(self.icon_size, math.max(Screen:scaleBySize(16), math.floor(self.inner_width / count) - Screen:scaleBySize(8)))
 
     local blocks = {}
+    self._blocks = blocks
     for i, tab in ipairs(self.tabs) do
         local selected = (i == self.selected)
         local parts = VerticalGroup:new{ align = "center" }
@@ -167,13 +189,23 @@ function TabBar:_rebuildTabs()
                 truncate_with_ellipsis = true,
             }
             -- The icon sits in the middle of this width, bold or not.
-            table.insert(parts, CenterContainer:new{
+            local holder = CenterContainer:new{
                 dimen = Geom:new{ w = text_w, h = label:getSize().h },
                 label,
-            })
+            }
+            table.insert(parts, holder)
+            blocks[i] = {
+                widget = parts,
+                w = math.max(block_w, 1),
+                label_holder = holder,
+                title = tab.title,
+                label_max = label_max,
+            }
         end
 
-        blocks[i] = { widget = parts, w = math.max(block_w, 1) }
+        if not blocks[i] then
+            blocks[i] = { widget = parts, w = math.max(block_w, 1) }
+        end
     end
 
     -- First word starts on the clock's margin, last word ends on the close
@@ -219,13 +251,37 @@ function TabBar:_rebuildTabs()
     end
 end
 
+function TabBar:_restyleLabel(index, selected)
+    local block = self._blocks and self._blocks[index]
+    if not block or not block.label_holder then
+        return
+    end
+    local label = TextWidget:new{
+        text = block.title or "",
+        face = Settings.face(self.face_size, "cfont"),
+        bold = selected,
+        fgcolor = Blitbuffer.COLOR_BLACK,
+        max_width = block.label_max,
+        truncate_with_ellipsis = true,
+    }
+    local old = block.label_holder[1]
+    block.label_holder[1] = label
+    free_widget(old)
+    if block.label_holder.resetLayout then
+        block.label_holder:resetLayout()
+    end
+end
+
 function TabBar:setSelected(index, skip_callback)
     if index < 1 or index > #self.tabs or index == self.selected then
         return
     end
+    local previous = self.selected
     self.selected = index
-    self:_rebuildTabs()
-    UIManager:setDirty(self.show_parent or self, "ui")
+    -- Bold is the only selected state. Rebuilding every icon here doubled
+    -- the work of a tab tap, because the shell refresh used to rebuild again.
+    self:_restyleLabel(previous, false)
+    self:_restyleLabel(index, true)
     if not skip_callback and self.on_change then
         self.on_change(self.tabs[index].id, index)
     end

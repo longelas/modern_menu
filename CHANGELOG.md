@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.10.0 — 2026-10-25
+
+The menu is faster on e-ink. Taps and long lists do less work, and the screen refreshes only the part that changed.
+
+### Changes
+- A tap updates the row that changed, and leaves the tabs, status bar, and shortcut row alone
+- Long lists build the visible rows and a short buffer, instead of every row at once
+- Fit-to-content and percentage heights refresh the menu sheet when its size stays the same, instead of the whole screen
+- Quick Menu toggles, slider drags, and scrolling each paint once per gesture
+
 ## 1.9.0 — 2026-10-20
 
 The status bar can be hidden, and the battery can show as a percentage.

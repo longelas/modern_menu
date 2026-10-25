@@ -41,6 +41,10 @@ function Breadcrumb:init()
 end
 
 function Breadcrumb:_rebuild()
+    if self[1] and self[1].free then
+        self[1]:free()
+        self[1] = nil
+    end
     local row = HorizontalGroup:new{ align = "center" }
     self.segments = {}
     local n = #self.crumbs
@@ -84,7 +88,13 @@ function Breadcrumb:_rebuild()
 end
 
 function Breadcrumb:setCrumbs(crumbs)
-    self.crumbs = crumbs or {}
+    crumbs = crumbs or {}
+    local key = tostring(self.width) .. "\0" .. table.concat(crumbs, "\0")
+    if key == self._crumb_key and self[1] then
+        return
+    end
+    self._crumb_key = key
+    self.crumbs = crumbs
     self:_rebuild()
 end
 

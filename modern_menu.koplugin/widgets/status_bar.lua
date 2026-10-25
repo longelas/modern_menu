@@ -234,6 +234,9 @@ function StatusBar:_batteryIcon()
             fgcolor = Blitbuffer.COLOR_BLACK,
         }
         local widest_size = widest:getSize()
+        if widest.free then
+            widest:free()
+        end
         local label_size = label:getSize()
         local slot = RightContainer:new{
             dimen = Geom:new{
@@ -257,6 +260,14 @@ function StatusBar:_batteryIcon()
 end
 
 function StatusBar:_rebuild()
+    local previous = self[1]
+    if previous and previous.free then
+        self[1] = nil
+        self.time_widget = nil
+        self._battery_glyph = nil
+        self._battery_text = nil
+        previous:free()
+    end
     local time_w = TextWidget:new{
         text = self:_clockText(),
         face = Settings.face(16, "cfont"),

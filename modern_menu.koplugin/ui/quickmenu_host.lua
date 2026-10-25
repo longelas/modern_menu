@@ -423,10 +423,12 @@ function QuickMenuHost.dispatch(shell, kind, ges)
     -- then refresh with setDirty(nil). On a phone that refresh already holds
     -- the framebuffer mutex, so the paint crashes. Move the value with
     -- _dragging left off and let the menu repaint normally.
-    local function move_slider(slider, abs_x)
+    local function move_slider(slider, abs_x, coalesce)
         if not slider or type(slider.applyPosition) ~= "function" or not abs_x then
             return false
         end
+        -- Leave _dragging off. These plugins paint the track onto Screen.bb
+        -- and then refresh while the framebuffer lock is held.
         slider._dragging = false
         slider.hide_knob = false
         local ok, err = pcall(slider.applyPosition, slider, abs_x)
@@ -434,7 +436,16 @@ function QuickMenuHost.dispatch(shell, kind, ges)
             logger.warn("modern_menu: slider update failed: " .. tostring(err))
             return false
         end
-        UIManager:setDirty(shell.show_parent or "all", "ui")
+        -- One paint while the finger is down, and always one when it lifts.
+        if coalesce then
+            if not shell._qm_slider_paint then
+                shell._qm_slider_paint = true
+                UIManager:setDirty(shell.show_parent or "all", "ui")
+            end
+        else
+            shell._qm_slider_paint = nil
+            UIManager:setDirty(shell.show_parent or "all", "ui")
+        end
         return true
     end
     local function slider_at(pos)
@@ -473,7 +484,7 @@ function QuickMenuHost.dispatch(shell, kind, ges)
         end
         if active and ges and ges.pos then
             shell._qm_slider_drag = active
-            return move_slider(active, ges.pos.x)
+            return move_slider(active, ges.pos.x, true)
         end
         if not in_area then
             return false
@@ -493,7 +504,7 @@ function QuickMenuHost.dispatch(shell, kind, ges)
             return in_area
         end
         if active and ges and ges.pos then
-            return move_slider(active, ges.pos.x)
+            return move_slider(active, ges.pos.x, false)
         end
         return false
     end
@@ -534,7 +545,7 @@ function QuickMenuHost.dispatch(shell, kind, ges)
             active = slider_at(ges.pos)
         end
         if active and sign ~= 0 and ges and ges.pos then
-            return move_slider(active, ges.pos.x + sign * (ges.distance or 0))
+            return move_slider(active, ges.pos.x + sign * (ges.distance or 0), false)
         end
         if not in_area then
             return false
@@ -685,26 +696,23 @@ local function make_shim(shell, tab)
         end
         shell._qm_updating = true
         local ok, err = pcall(function()
+            local full_paint = full or shell._qm_refresh_full
+            shell._qm_refresh_full = false
             if shell.refreshQuickMenu then
-                shell:refreshQuickMenu()
+                -- refreshQuickMenu paints once. A full refresh is that one paint.
+                shell:refreshQuickMenu(full_paint)
             else
                 shell:refresh()
+                if full_paint then
+                    UIManager:setDirty("all", "full")
+                end
             end
         end)
         shell._qm_updating = false
         if not ok then
             logger.warn("modern_menu: quickmenu refresh failed: " .. tostring(err))
         end
-        if full or shell._qm_refresh_full then
-            shell._qm_refresh_full = false
-            UIManager:setDirty("all", "full")
-        else
-            -- show_parent is the window. "all" covers the case where a
-            -- button highlight already drained that dirty flag mid-tap.
-            UIManager:setDirty(shell.show_parent or "all", "ui")
-            UIManager:setDirty("all", "ui")
-        end
-        if shell._qm_followup then
+        if not shell._qm_refresh_pending or shell._qm_followup then
             return
         end
         shell._qm_followup = true
@@ -716,11 +724,7 @@ local function make_shim(shell, tab)
             if shell._qm_refresh_pending then
                 shell._qm_refresh_pending = false
                 shim:updateItems()
-                return
             end
-            -- One more paint after the tap returns, so a stock Button
-            -- forceRePaint cannot leave the pre-toggle glyph on screen.
-            UIManager:setDirty(shell.show_parent or "all", "ui")
         end)
     end
 
@@ -753,6 +757,7 @@ local function make_shim(shell, tab)
             end
         end
         UIManager:nextTick(function()
+            Settings.flushPending()
             if cb then
                 cb()
             else
@@ -1148,16 +1153,28 @@ local function raise_window(widget)
     end
 end
 
+-- Lua functions cannot hold fields. Same table main.lua uses to unlink
+-- the menu's show wrapper when this layer is stacked above it.
+local function show_links()
+    local links = UIManager._mm_show_links
+    if not links then
+        links = setmetatable({}, { __mode = "k" })
+        UIManager._mm_show_links = links
+    end
+    return links
+end
+
 -- Neo labels this "Drag & Drop" and opens KOReader's SortWidget. That widget
 -- is not modal, so it was inserted under this menu and never saw the drag.
 -- Hold a row, then drag it to a new slot. Tap still selects; the arrows still move.
 local function install_sort_drag()
-    if UIManager._mm_sort_show then
+    if UIManager._mm_sort_installed then
         return
     end
-    local orig_show = UIManager.show
-    UIManager._mm_sort_show = orig_show
-    function UIManager:show(widget, ...)
+    UIManager._mm_sort_installed = true
+    -- Call the previous show through the link table so a later wrapper can
+    -- be unlinked without leaving this closure holding the open menu.
+    local function sort_show(self, widget, ...)
         if is_slide_confirm(widget) and not widget._mm_slide then
             arm_slide_confirm(widget)
         end
@@ -1197,13 +1214,16 @@ local function install_sort_drag()
             end
             patch_sort_rows(widget)
         end
-        local shown = orig_show(self, widget, ...)
+        local prev = show_links()[sort_show].prev
+        local shown = prev(self, widget, ...)
         if is_slide_confirm(widget) then
             raise_window(widget)
             UIManager:setDirty(widget, "ui")
         end
         return shown
     end
+    show_links()[sort_show] = { prev = UIManager.show, layer = "sort" }
+    UIManager.show = sort_show
 end
 
 -- KOReader's SSH plugin handles ToggleSSHServer. Neo broadcasts ToggleSshServer.
