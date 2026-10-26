@@ -1236,7 +1236,10 @@ function ModernMenu:_buildModernMenu(menu_self, tab_index)
     menu_container.cropping_widget = shell.scroll_container
     menu_self.menu_container = menu_container
     UIManager:show(menu_container)
-    UIManager:setDirty(menu_container, "ui")
+    -- The page under a short sheet is already on screen. Refresh the sheet.
+    UIManager:setDirty(menu_container, function()
+        return "ui", shell:_sheetRegion()
+    end)
     return true
 end
 

@@ -275,6 +275,7 @@ function MenuItemCard:init()
 end
 
 --- Flip a check, radio, or label without rebuilding the row chrome.
+-- Returns true when the label, check, radio, or enabled state changed.
 function MenuItemCard:updateState()
     local item = self.item or {}
     local option_font = self._option_font or Settings.getOptionFontSize()
@@ -282,7 +283,9 @@ function MenuItemCard:updateState()
     local checked = item_checked(item)
     local text = item_text(item)
     local fg = enabled and Blitbuffer.COLOR_BLACK or Settings.getDisabledFg()
+    local changed = self.enabled ~= enabled
     if self._title and (self._title.text ~= text or self._title.fgcolor ~= fg) then
+        changed = true
         local updated = TextWidget:new{
             text = text,
             face = row_face(item, option_font),
@@ -302,6 +305,7 @@ function MenuItemCard:updateState()
     end
     local kind = trailing_kind(item, checked)
     if kind ~= self._trailing_kind then
+        changed = true
         local toggle_flip = kind:sub(1, 6) == "toggle" and self._trailing_kind
             and self._trailing_kind:sub(1, 6) == "toggle"
         local radio_flip = kind:sub(1, 5) == "radio" and self._trailing_kind
@@ -326,6 +330,7 @@ function MenuItemCard:updateState()
         self._trailing_kind = kind
     end
     self.enabled = enabled
+    return changed
 end
 
 function MenuItemCard:onTapItem(_, ges)

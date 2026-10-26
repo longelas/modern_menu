@@ -437,14 +437,22 @@ function QuickMenuHost.dispatch(shell, kind, ges)
             return false
         end
         -- One paint while the finger is down, and always one when it lifts.
+        -- The waveform covers the sheet. The page below a short menu stays put.
+        local function dirty_slider()
+            if shell._dirtySheet then
+                shell:_dirtySheet()
+            else
+                UIManager:setDirty(shell.show_parent or "all", "ui")
+            end
+        end
         if coalesce then
             if not shell._qm_slider_paint then
                 shell._qm_slider_paint = true
-                UIManager:setDirty(shell.show_parent or "all", "ui")
+                dirty_slider()
             end
         else
             shell._qm_slider_paint = nil
-            UIManager:setDirty(shell.show_parent or "all", "ui")
+            dirty_slider()
         end
         return true
     end

@@ -594,6 +594,24 @@ function ModernMenuShell:_dirtyTarget()
     return self.show_parent or self
 end
 
+--- Sheet rectangle in screen space. A missing height uses the laid-out sheet.
+function ModernMenuShell:_sheetRegion(height)
+    local w = (self.dimen and self.dimen.w) or Screen:getWidth()
+    local h = height or self._sheet_h or (self.dimen and self.dimen.h) or Screen:getHeight()
+    if h < 1 then
+        h = 1
+    end
+    return Geom:new{ x = 0, y = 0, w = w, h = h }
+end
+
+--- Refresh the sheet after paint, so the height is the one just laid out.
+function ModernMenuShell:_dirtySheet()
+    local shell = self
+    UIManager:setDirty(self:_dirtyTarget(), function()
+        return "ui", shell:_sheetRegion()
+    end)
+end
+
 function ModernMenuShell:_clearGroup(group)
     if not group then
         return
@@ -781,7 +799,67 @@ function ModernMenuShell:_rowEstimate(with_separator)
     return height
 end
 
-function ModernMenuShell:_fillList(items, width, dirty_parent, viewport_h, scroll_y)
+function ModernMenuShell:_rowHeight(index, n)
+    return self._row_heights[index] or self:_rowEstimate(index < n)
+end
+
+--- First and last row indexes that cover scroll_y, plus buffer pixels above and below.
+function ModernMenuShell:_windowRange(n, viewport_h, scroll_y, buffer)
+    local first, last = 1, n
+    local y = 0
+    for i = 1, n do
+        local h = self:_rowHeight(i, n)
+        if y + h > scroll_y - buffer then
+            first = i
+            break
+        end
+        y = y + h
+    end
+    local limit = scroll_y + viewport_h + buffer
+    local acc = 0
+    for i = 1, n do
+        acc = acc + self:_rowHeight(i, n)
+        last = i
+        if acc >= limit then
+            break
+        end
+    end
+    if last < first then
+        last = first
+    end
+    return first, last
+end
+
+function ModernMenuShell:_makeRowCard(item, index, n, width, dirty_parent, stripe)
+    return MenuItemCard:new{
+        item = item,
+        width = width,
+        side_margin = self.side_margin,
+        show_parent = dirty_parent,
+        menu = self,
+        index = index,
+        show_separator = index < n,
+        stripe = stripe,
+    }
+end
+
+function ModernMenuShell:_stripeAt(items, index)
+    local stripe = 0
+    for i = 1, index - 1 do
+        if items[i] and items[i].separator then
+            stripe = 1 - stripe
+        end
+    end
+    return stripe
+end
+
+--- Drop a scheduled off-screen row build. The next fill or rebuild installs its own.
+function ModernMenuShell:_invalidateWindowExtend()
+    self._buffer_gen = (self._buffer_gen or 0) + 1
+end
+
+function ModernMenuShell:_fillList(items, width, dirty_parent, viewport_h, scroll_y, with_buffer)
+    self:_invalidateWindowExtend()
     self:_clearGroup(self.list_group)
     self._cards = {}
     self._showing_panel = false
@@ -799,79 +877,49 @@ function ModernMenuShell:_fillList(items, width, dirty_parent, viewport_h, scrol
     if n == 0 then
         table.insert(self.list_group, self:_emptyNotice(_("No items in this menu.")))
         self._windowed = false
+        self._win_buffered = true
         self._built_items = {}
         return
     end
-    local function row_h(index)
-        return self._row_heights[index] or self:_rowEstimate(index < n)
-    end
     local total = 0
     for i = 1, n do
-        total = total + row_h(i)
+        total = total + self:_rowHeight(i, n)
     end
     viewport_h = math.max(1, viewport_h or total)
     scroll_y = math.max(0, scroll_y or 0)
     local first, last = 1, n
     local windowed = total > viewport_h + 1
+    -- Navigation paints the viewport first. The off-screen buffer is built
+    -- on a later tick so the waveform is not waiting on those rows.
+    -- A scroll that leaves the window still asks for the buffer immediately.
+    local buffer = 0
+    if windowed and with_buffer ~= false then
+        buffer = viewport_h
+    end
     if windowed then
-        local buffer = viewport_h
-        local y = 0
-        for i = 1, n do
-            local h = row_h(i)
-            if y + h > scroll_y - buffer then
-                first = i
-                break
-            end
-            y = y + h
-        end
-        local limit = scroll_y + viewport_h + buffer
-        local acc = 0
-        for i = 1, n do
-            acc = acc + row_h(i)
-            last = i
-            if acc >= limit then
-                break
-            end
-        end
-        if last < first then
-            last = first
-        end
+        first, last = self:_windowRange(n, viewport_h, scroll_y, buffer)
     end
     local top = 0
     for i = 1, first - 1 do
-        top = top + row_h(i)
+        top = top + self:_rowHeight(i, n)
     end
     if top > 0 then
         table.insert(self.list_group, VerticalSpan:new{ width = top })
     end
-    local stripe = 0
-    for i = 1, first - 1 do
-        if items[i].separator then
-            stripe = 1 - stripe
-        end
-    end
+    local stripe = self:_stripeAt(items, first)
     for i = first, last do
-        local card = MenuItemCard:new{
-            item = items[i],
-            width = width,
-            side_margin = self.side_margin,
-            show_parent = dirty_parent,
-            menu = self,
-            index = i,
-            show_separator = i < n,
-            stripe = stripe,
-        }
+        local card = self:_makeRowCard(items[i], i, n, width, dirty_parent, stripe)
         table.insert(self.list_group, card)
         self._cards[#self._cards + 1] = card
         local size = card:getSize()
-        self._row_heights[i] = size and size.h or row_h(i)
+        self._row_heights[i] = size and size.h or self:_rowHeight(i, n)
         if items[i].separator then
             stripe = 1 - stripe
         end
     end
     local bottom = 0
     for i = last + 1, n do
-        bottom = bottom + row_h(i)
+        bottom = bottom + self:_rowHeight(i, n)
     end
     if bottom > 0 then
         table.insert(self.list_group, VerticalSpan:new{ width = bottom })
@@ -881,13 +929,205 @@ function ModernMenuShell:_fillList(items, width, dirty_parent, viewport_h, scrol
         shown = shown + (self._row_heights[i] or 0)
     end
     self._windowed = windowed
+    self._win_first = first
+    self._win_last = last
     self._win_y0 = top
     self._win_y1 = top + shown
+    self._win_items = items
+    self._win_width = width
+    self._win_parent = dirty_parent
+    self._win_view = viewport_h
+    self._win_buffered = (not windowed) or buffer > 0
     local built = {}
     for i = 1, n do
         built[i] = items[i]
     end
     self._built_items = built
+end
+
+--- After the viewport has painted, build one viewport of rows above and below.
+-- Visible cards stay in place. A height correction above the viewport shifts
+-- the scroll offset by the same amount, so the rows on screen do not move.
+function ModernMenuShell:_scheduleWindowExtend()
+    if not self._windowed or self._win_buffered or self._showing_panel or self._closing then
+        return
+    end
+    local generation = self._buffer_gen or 0
+    local shell = self
+    -- Queued beside the sheet refresh, so it runs after that paint. The buffer
+    -- itself waits one more tick and does not delay the waveform.
+    UIManager:setDirty(nil, function()
+        if shell._closing or shell._buffer_gen ~= generation then
+            return
+        end
+        UIManager:nextTick(function()
+            if shell._closing or shell._buffer_gen ~= generation then
+                return
+            end
+            shell:_extendListBuffer()
+        end)
+    end)
+end
+
+function ModernMenuShell:_extendListBuffer()
+    if self._closing or not self._windowed or self._win_buffered or self._showing_panel then
+        return
+    end
+    if not self:_windowCovers() then
+        self:_ensureListWindow()
+        local view = self.scroll_container and self.scroll_container.dimen
+        if view then
+            UIManager:setDirty(self:_dirtyTarget(), "ui", view)
+        end
+        return
+    end
+    local items = self._win_items
+    local n = items and #items or 0
+    if n == 0 then
+        self._win_buffered = true
+        return
+    end
+    local viewport_h = self._win_view or 0
+    local sc = self.scroll_container
+    local scroll_y = (sc and sc._scroll_offset_y) or 0
+    local old_first = self._win_first or 1
+    local old_last = self._win_last or n
+    local want_first, want_last = self:_windowRange(n, viewport_h, scroll_y, viewport_h)
+    -- Keep rows already built. Only add the buffer that is still missing.
+    local first = math.min(want_first, old_first)
+    local last = math.max(want_last, old_last)
+    if first == old_first and last == old_last then
+        self._win_buffered = true
+        return
+    end
+    local total_before = 0
+    for i = 1, n do
+        total_before = total_before + self:_rowHeight(i, n)
+    end
+    local width = self._win_width
+    local dirty_parent = self._win_parent
+    local estimated_above = 0
+    for i = first, old_first - 1 do
+        estimated_above = estimated_above + self:_rowHeight(i, n)
+    end
+    local above = {}
+    local stripe = self:_stripeAt(items, first)
+    local real_above = 0
+    for i = first, old_first - 1 do
+        local card = self:_makeRowCard(items[i], i, n, width, dirty_parent, stripe)
+        above[#above + 1] = card
+        local size = card:getSize()
+        self._row_heights[i] = size and size.h or self:_rowHeight(i, n)
+        real_above = real_above + self._row_heights[i]
+        if items[i].separator then
+            stripe = 1 - stripe
+        end
+    end
+    for i = old_first, old_last do
+        if items[i] and items[i].separator then
+            stripe = 1 - stripe
+        end
+    end
+    local below = {}
+    for i = old_last + 1, last do
+        local card = self:_makeRowCard(items[i], i, n, width, dirty_parent, stripe)
+        below[#below + 1] = card
+        local size = card:getSize()
+        self._row_heights[i] = size and size.h or self:_rowHeight(i, n)
+        if items[i].separator then
+            stripe = 1 - stripe
+        end
+    end
+    local group = self.list_group
+    local existing = {}
+    local spans = {}
+    for i = 1, #group do
+        local child = group[i]
+        if child and child.item then
+            existing[#existing + 1] = child
+        elseif child then
+            spans[#spans + 1] = child
+        end
+    end
+    for i = #group, 1, -1 do
+        group[i] = nil
+    end
+    for _, span in ipairs(spans) do
+        if span.free then
+            span:free()
+        end
+    end
+    local top = 0
+    for i = 1, first - 1 do
+        top = top + self:_rowHeight(i, n)
+    end
+    if top > 0 then
+        table.insert(group, VerticalSpan:new{ width = top })
+    end
+    for _, card in ipairs(above) do
+        table.insert(group, card)
+    end
+    for _, card in ipairs(existing) do
+        table.insert(group, card)
+    end
+    for _, card in ipairs(below) do
+        table.insert(group, card)
+    end
+    local bottom = 0
+    for i = last + 1, n do
+        bottom = bottom + self:_rowHeight(i, n)
+    end
+    if bottom > 0 then
+        table.insert(group, VerticalSpan:new{ width = bottom })
+    end
+    local cards = {}
+    for _, card in ipairs(above) do
+        cards[#cards + 1] = card
+    end
+    for _, card in ipairs(existing) do
+        cards[#cards + 1] = card
+    end
+    for _, card in ipairs(below) do
+        cards[#cards + 1] = card
+    end
+    self._cards = cards
+    local shown = 0
+    for i = first, last do
+        shown = shown + (self._row_heights[i] or 0)
+    end
+    self._win_first = first
+    self._win_last = last
+    self._win_y0 = top
+    self._win_y1 = top + shown
+    self._win_buffered = true
+    local delta = real_above - estimated_above
+    if sc then
+        sc._scroll_offset_y = (sc._scroll_offset_y or 0) + delta
+    end
+    if group.resetLayout then
+        group:resetLayout()
+    end
+    if sc and sc[1] and sc[1] ~= group and sc[1].resetLayout then
+        sc[1]:resetLayout()
+    end
+    self:_reflowScroll(true)
+    local total_after = 0
+    for i = 1, n do
+        total_after = total_after + self:_rowHeight(i, n)
+    end
+    -- Row pixels stayed put. The thumb changes only when a real height
+    -- replaced an estimate, and that strip is the scrollbar gutter.
+    if total_after ~= total_before and sc and sc.dimen and sc.dimen.y and sc._v_scroll_bar then
+        local gutter = (sc.scroll_bar_width or 0) * 3
+        if gutter > 0 then
+            UIManager:setDirty(self:_dirtyTarget(), "ui", Geom:new{
+                x = sc.dimen.x + sc.dimen.w - gutter,
+                y = sc.dimen.y,
+                w = gutter,
+                h = sc.dimen.h,
+            })
+        end
+    end
 end
 
 function ModernMenuShell:_windowCovers()
@@ -916,7 +1156,7 @@ function ModernMenuShell:_ensureListWindow()
     self._in_window = true
     local items = self:_visibleItems()
     local width = self.list_content_w or (self.dimen.w - (self.scrollbar_gutter or 0))
-    self:_fillList(items, width, self:_dirtyTarget(), sc.dimen and sc.dimen.h or 0, sc._scroll_offset_y or 0)
+    self:_fillList(items, width, self:_dirtyTarget(), sc.dimen and sc.dimen.h or 0, sc._scroll_offset_y or 0, true)
     self:_reflowScroll(true)
     self._in_window = false
 end
@@ -930,8 +1170,11 @@ function ModernMenuShell:_reflowScroll(preserve)
     if preserve then
         y = sc._scroll_offset_y or 0
     end
-    if sc._bb then
-        sc._bb:free()
+    -- The next paint fills this buffer before blitting. Keep it when the
+    -- screen size matches so a tab or submenu does not allocate it again.
+    local bb = sc._bb
+    if bb and (bb:getWidth() ~= Screen:getWidth() or bb:getHeight() ~= Screen:getHeight()) then
+        bb:free()
         sc._bb = nil
     end
     sc._scroll_offset_x = 0
@@ -1018,32 +1261,49 @@ function ModernMenuShell:_sameBuiltItems()
 end
 
 function ModernMenuShell:_refreshVisibleRows()
+    local changed = {}
     for _, card in ipairs(self._cards or {}) do
-        if card.updateState then
-            card:updateState()
+        if card.updateState and card:updateState() then
+            changed[#changed + 1] = card
         end
     end
+    return changed
 end
 
-function ModernMenuShell:_dirtyRows()
-    local target = self:_dirtyTarget()
+--- One rectangle around the rows whose pixels changed.
+-- Adjacent checks merge into a single waveform. Rows that did not change
+-- stay out of it. Off-screen rows are updated in the tree and not refreshed.
+function ModernMenuShell:_dirtyRows(cards)
     local sc = self.scroll_container
     local view = sc and sc.dimen
-    local painted = false
-    for _, card in ipairs(self._cards or {}) do
+    local x, y, x2, y2
+    for _, card in ipairs(cards or {}) do
         local region = card.dimen
         local on_screen = region and view and region.w and region.h and region.w > 0
             and region.y and view.y
             and region.y + region.h > view.y
             and region.y < view.y + view.h
         if on_screen then
-            UIManager:setDirty(target, "ui", region)
-            painted = true
+            local left = region.x or 0
+            local top = region.y or 0
+            local right = left + region.w
+            local bottom = top + region.h
+            if not x then
+                x, y, x2, y2 = left, top, right, bottom
+            else
+                if left < x then x = left end
+                if top < y then y = top end
+                if right > x2 then x2 = right end
+                if bottom > y2 then y2 = bottom end
+            end
         end
     end
-    if not painted then
-        UIManager:setDirty(target, "ui")
+    if not x then
+        return
     end
+    UIManager:setDirty(self:_dirtyTarget(), "ui", Geom:new{
+        x = x, y = y, w = x2 - x, h = y2 - y,
+    })
 end
 
 --- KOReader applies a pan on release, one _scrollBy per swipe or page key.
@@ -1085,19 +1345,29 @@ end
 
 function ModernMenuShell:_dirtyMenu()
     -- Repaint the page under the sheet only when that sheet grew or shrank.
+    -- The waveform is the sheet, or the union of the old and new sheet.
     local mode = Settings.getMenuHeightMode()
-    local sheet = self._sheet_h
+    local sheet = self._sheet_h or 0
     local previous = self._painted_sheet_h
     local height_changed = previous ~= nil and sheet ~= previous
     self._painted_sheet_h = sheet
-    if mode ~= Settings.MENU_HEIGHT_FULL and (height_changed or previous == nil) then
-        UIManager:setDirty("all", "ui")
+    if mode == Settings.MENU_HEIGHT_FULL then
+        UIManager:setDirty(self:_dirtyTarget(), "ui")
         return
     end
-    UIManager:setDirty(self:_dirtyTarget(), "ui")
+    if height_changed or previous == nil then
+        local shell = self
+        local cover = math.max(sheet, previous or 0)
+        UIManager:setDirty("all", function()
+            return "ui", shell:_sheetRegion(math.max(cover, shell._sheet_h or 0))
+        end)
+        return
+    end
+    self:_dirtySheet()
 end
 
 function ModernMenuShell:_rebuildContent(opts)
+    self:_invalidateWindowExtend()
     opts = opts or {}
     local reset_scroll = opts.reset_scroll and true or false
     self:_detach(self.qm_footer_slot, self._shortcuts_bar)
@@ -1187,7 +1457,7 @@ function ModernMenuShell:_rebuildContent(opts)
             -- Leave room for the v-scrollbar so content never overflows horizontally
             local width = self.list_content_w or (self.dimen.w - (self.scrollbar_gutter or 0))
             local dirty_parent = self:_dirtyTarget()
-            self:_fillList(items, width, dirty_parent, viewport_h, scroll_y)
+            self:_fillList(items, width, dirty_parent, viewport_h, scroll_y, false)
         end
     end
 
@@ -1201,7 +1471,8 @@ function ModernMenuShell:_rebuildContent(opts)
         end
     end
 
-    -- A live crop buffer would blit the previous glyphs over the new panel.
+    -- paintTo fills the compose buffer before blitting, so the previous
+    -- glyphs are not left on screen when this child is swapped in.
     self:_takeScrollChild(content)
     -- Size the sheet after the rows exist so "fit content" can measure them.
     self:_applySheetHeight(self._pending_footer_h or 0)
@@ -1218,6 +1489,7 @@ function ModernMenuShell:_rebuildContent(opts)
     if self.breadcrumb then
         self.breadcrumb:setCrumbs(self:_breadcrumbCrumbs())
     end
+    self:_scheduleWindowExtend()
 end
 
 --- Rebuild the Quick Menu body without reloading tab chrome.
@@ -1470,8 +1742,7 @@ function ModernMenuShell:updateItems()
         return
     end
     if self:_sameBuiltItems() then
-        self:_refreshVisibleRows()
-        self:_dirtyRows()
+        self:_dirtyRows(self:_refreshVisibleRows())
         return
     end
     self:refresh("content")
@@ -1716,7 +1987,7 @@ function ModernMenuShell:onShow()
     if self.ui then
         self.ui:handleEvent(Event:new("CloseConfigMenu"))
     end
-    UIManager:setDirty(self:_dirtyTarget(), "ui")
+    self:_dirtySheet()
     return true
 end
 
