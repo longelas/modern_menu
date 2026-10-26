@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.11.0 — 2026-10-26
+
+The menu refreshes a smaller part of the screen, so an e-ink update finishes sooner.
+
+### Changes
+- Opening the menu, switching tabs, moving through a submenu, and dragging a Quick Menu slider refresh the menu sheet. The page below a short menu stays as it is
+- When the sheet grows or shrinks, the refresh covers the old and new height, so the page that was covered or uncovered is drawn
+- A check, radio, or changed label refreshes those rows as one block
+- A long list paints the rows on screen first. The rows just above and below are built after that paint, and the rows on screen stay where they are
+
 ## 1.10.0 — 2026-10-25
 
 The menu is faster on e-ink. Taps and long lists do less work, and the screen refreshes only the part that changed.
