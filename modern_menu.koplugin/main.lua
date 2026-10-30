@@ -1045,6 +1045,7 @@ function ModernMenu:_insertKoboldTab(menu_self)
             end
             table.insert(tabs, at, tab)
         end
+        self:_ensureFileBrowserTab(menu_self)
         return
     end
 
@@ -1067,14 +1068,64 @@ function ModernMenu:_insertKoboldTab(menu_self)
     if type(saved) == "number" and saved >= at then
         menu_self.last_tab_index = saved + 1
     end
+    self:_ensureFileBrowserTab(menu_self)
+end
+
+--- Quick Menu drops the Files tab in the file browser, and Kobold covers
+-- that browser, so the way back to the file list disappears. Put the tab
+-- back. A tap closes Kobold (and a book, if one is open) onto the file list.
+function ModernMenu:_ensureFileBrowserTab(menu_self)
+    local tabs = menu_self and menu_self.tab_item_table
+    if type(tabs) ~= "table" then
+        return
+    end
+    for _, tab in ipairs(tabs) do
+        if tab.id == "filemanager" then
+            return
+        end
+    end
+    local at = #tabs + 1
+    for i, tab in ipairs(tabs) do
+        if tab.id == "main" or tab.id == "exit_tab" then
+            at = i
+            break
+        end
+    end
+    table.insert(tabs, at, {
+        id = "filemanager",
+        icon = "appbar.filebrowser",
+        remember = false,
+    })
+    -- Quick Menu removes this tab and we put it back in the same place, so
+    -- the saved index is already right. Bump only when the tab is new.
+    if self._mm_files_tab_was_present then
+        return
+    end
+    local saved = menu_self.last_tab_index
+    if type(saved) ~= "number" and G_reader_settings then
+        saved = G_reader_settings:readSetting("filemanagermenu_tab_index")
+    end
+    if type(saved) == "number" and saved >= at then
+        menu_self.last_tab_index = saved + 1
+    end
 end
 
 function ModernMenu:_buildModernMenu(menu_self, tab_index)
     if menu_self.tab_item_table == nil and menu_self.setUpdateItemTable then
         menu_self:setUpdateItemTable()
     end
+    self._mm_files_tab_was_present = false
+    if type(menu_self.tab_item_table) == "table" then
+        for _, tab in ipairs(menu_self.tab_item_table) do
+            if tab.id == "filemanager" then
+                self._mm_files_tab_was_present = true
+                break
+            end
+        end
+    end
     -- Quick Menu inserts its panel tab from setUpdateItemTable. Sync again
     -- so the tab is present even if that table was built earlier.
+    -- That sync also drops the Files tab while this menu is the file browser.
     QuickMenuHost.sync(menu_self)
     -- Reader injects the Simple UI tab from onShowMenu, which this hook
     -- replaces. Make sure the tab exists before the opening index is chosen.

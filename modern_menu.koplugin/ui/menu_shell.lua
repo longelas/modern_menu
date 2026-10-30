@@ -1177,6 +1177,10 @@ function ModernMenuShell:_reflowScroll(preserve)
         bb:free()
         sc._bb = nil
     end
+    -- initState builds a new bar. A long list extends its off-screen rows
+    -- without painting, and the new bar has no touch rect until that paint,
+    -- so a drag on the bar that is already on screen does nothing.
+    local previous_touch = sc._v_scroll_bar and sc._v_scroll_bar.touch_dimen
     sc._scroll_offset_x = 0
     sc._scroll_offset_y = 0
     sc._v_scroll_bar = nil
@@ -1197,6 +1201,9 @@ function ModernMenuShell:_reflowScroll(preserve)
     sc._scroll_offset_y = y
     if sc._updateScrollBars then
         sc:_updateScrollBars()
+    end
+    if sc._v_scroll_bar and previous_touch and not sc._v_scroll_bar.touch_dimen then
+        sc._v_scroll_bar.touch_dimen = previous_touch
     end
 end
 
@@ -1748,10 +1755,42 @@ function ModernMenuShell:updateItems()
     self:refresh("content")
 end
 
+--- Close every Kobold screen and forget a parked return, so the file
+-- browser underneath is what stays. A book opened from Kobold would
+-- otherwise bring that screen back as soon as the book closes.
+function ModernMenuShell:_dismissKobold()
+    local ok_session, Session = pcall(require, "kobold.ui.session")
+    if ok_session and type(Session) == "table" and Session.take then
+        local took, pending = pcall(Session.take)
+        if took and type(pending) == "table" and pending.screen then
+            pcall(function()
+                UIManager:close(pending.screen)
+            end)
+        end
+    end
+    local stack = UIManager._window_stack
+    if type(stack) ~= "table" then
+        return
+    end
+    local doomed = {}
+    for i = #stack, 1, -1 do
+        local widget = stack[i].widget
+        if type(widget) == "table" and widget.kobold_tab then
+            doomed[#doomed + 1] = widget
+        end
+    end
+    for _, widget in ipairs(doomed) do
+        pcall(function()
+            UIManager:close(widget)
+        end)
+    end
+end
+
 --- Leave the open book and land in the file browser.
 -- Quick Menu's exit-tab callback closes over whichever menu first created
 -- the tab, so from the reader it often no-ops. This uses the menu that is
--- actually open.
+-- actually open. The Files tab drops Kobold first, so this lands on the
+-- file list rather than on the screen Kobold would restore.
 function ModernMenuShell:_goToFileManager()
     local ui = self.ui
     if not (ui and ui.document and ui.onClose and ui.showFileManager) then
@@ -1826,7 +1865,12 @@ function ModernMenuShell:switchMenuTab(tab_num)
     -- A tap in the reader leaves the book for the file browser.
     -- A tap in the file browser just dismisses the menu; hold quits KOReader.
     if tab.id == "exit_tab" or tab.id == "filemanager" then
-        if tab.id == "exit_tab" and not (self.ui and self.ui.document) then
+        if tab.id == "filemanager" then
+            -- Kobold is covering the file list. Drop it, then leave the book
+            -- if one is open, so this tab lands on the file browser.
+            self:_dismissKobold()
+            self:_goToFileManager()
+        elseif not (self.ui and self.ui.document) then
             self:closeMenu()
         else
             self:_goToFileManager()
@@ -1988,6 +2032,305 @@ function ModernMenuShell:onShow()
         self.ui:handleEvent(Event:new("CloseConfigMenu"))
     end
     self:_dirtySheet()
+    return true
+end
+
+local function search_item_enabled(item)
+    if item.enabled == false then
+        return false
+    end
+    if item.enabled_func then
+        local ok, enabled = pcall(item.enabled_func)
+        if ok and not enabled then
+            return false
+        end
+    end
+    return true
+end
+
+local function search_item_text(item)
+    if item.text_func then
+        local ok, text = pcall(item.text_func)
+        if ok and type(text) == "string" then
+            return text
+        end
+    end
+    if type(item.text) == "string" then
+        return item.text
+    end
+    return nil
+end
+
+--- Same index paths as TouchMenu:search. "2.3.1" is tab 2, item 3, then its first child.
+function ModernMenuShell:search(search_for)
+    local found = {}
+    local Utf8Proc = require("ffi/utf8proc")
+    local needle = Utf8Proc.lowercase(search_for or "")
+    local max_depth = 10
+
+    local function recurse(item_table, path, text, icon, depth)
+        if type(item_table) ~= "table" or item_table.ignored_by_menu_search then
+            return
+        end
+        depth = depth + 1
+        if depth > max_depth then
+            return
+        end
+        for i, entry in ipairs(item_table) do
+            if type(entry) == "table" and not entry.ignored_by_menu_search then
+                local entry_text = search_item_text(entry)
+                local walk_path = tostring(path) .. "." .. i
+                local displayed = entry_text
+                if entry_text and not search_item_enabled(entry) then
+                    displayed = "\u{2592}\u{200A}" .. entry_text
+                end
+                local indent = "\u{2192}\u{200A}"
+                if text then
+                    indent = ("\u{200A}"):rep(2 * math.min(depth - 1, 6)) .. indent
+                end
+                local walk_text = text and (text .. "\n" .. indent .. (displayed or ""))
+                    or (indent .. (displayed or ""))
+                if entry_text and entry_text ~= "KOMenu:separator"
+                        and Utf8Proc.lowercase(entry_text):find(needle, 1, true) then
+                    found[#found + 1] = { entry_text, icon, walk_path, walk_text }
+                end
+                local sub = entry.sub_item_table
+                if entry.sub_item_table_func then
+                    local ok, built = pcall(entry.sub_item_table_func)
+                    if ok then
+                        sub = built
+                    end
+                end
+                if type(sub) == "table" and not sub.ignored_by_menu_search then
+                    recurse(sub, walk_path, walk_text, icon, depth)
+                end
+            end
+        end
+    end
+
+    local tabs = self.tab_item_table or {}
+    for i = 1, #tabs do
+        recurse(tabs[i], i, nil, tabs[i].icon, 0)
+    end
+    return found
+end
+
+--- Put this row at the top of the list. Search opens the page; the row has to be on screen.
+function ModernMenuShell:_scrollToItem(item)
+    local items = self:_visibleItems()
+    local index
+    for i, candidate in ipairs(items) do
+        if candidate == item then
+            index = i
+            break
+        end
+    end
+    if not index then
+        return
+    end
+    local y = 0
+    local n = #items
+    for i = 1, index - 1 do
+        y = y + self:_rowHeight(i, n)
+    end
+    if self.scroll_container then
+        self.scroll_container._scroll_offset_y = y
+    end
+    self:_rebuildContent({ reset_scroll = false })
+    self:_dirtyMenu()
+end
+
+--- Follow a search path. The last index is shown, not activated.
+function ModernMenuShell:openMenu(path, with_animation)
+    if self._closing or type(path) ~= "string" or path == "" then
+        return
+    end
+    local parts = {}
+    for part in path:gmatch("[^%.]+") do
+        local n = tonumber(part)
+        if n then
+            parts[#parts + 1] = n
+        end
+    end
+    local tab_nb = table.remove(parts, 1)
+    if not tab_nb then
+        return
+    end
+    local shell = self
+    local function go(i)
+        if shell._closing then
+            return
+        end
+        if i > #parts then
+            return
+        end
+        local item = shell.item_table and shell.item_table[parts[i]]
+        if type(item) ~= "table" then
+            return
+        end
+        local last = i == #parts
+        if last or not search_item_enabled(item) then
+            shell:_scrollToItem(item)
+            return
+        end
+        shell:onMenuSelect(item)
+        if shell._closing then
+            return
+        end
+        if with_animation then
+            UIManager:scheduleIn(0.35, function()
+                go(i + 1)
+            end)
+        else
+            go(i + 1)
+        end
+    end
+    self:switchMenuTab(tab_nb)
+    -- An action tab (Files, Exit, Kobold) leaves this page. Don't walk its rows.
+    if self._closing or self.last_index ~= tab_nb then
+        return
+    end
+    if #parts == 0 then
+        return
+    end
+    if with_animation then
+        UIManager:scheduleIn(0.2, function()
+            go(1)
+        end)
+    else
+        go(1)
+    end
+end
+
+--- Help → Menu search. The item sends ShowMenuSearch to the open menu.
+-- Stock handles that on TouchMenu, which this shell replaces, so the dialog never opened.
+function ModernMenuShell:onShowMenuSearch()
+    if self._closing then
+        return true
+    end
+    local InputDialog = require("ui/widget/inputdialog")
+    local ConfirmBox = require("ui/widget/confirmbox")
+    local InfoMessage = require("ui/widget/infomessage")
+    local Menu = require("ui/widget/menu")
+    local T = require("ffi/util").template
+    local Utf8Proc = require("ffi/utf8proc")
+    local shell = self
+
+    local function show_search_results(search_string)
+        local found_menu_items = shell:search(search_string)
+        local function open_menu(i, animate)
+            if shell.results_menu_container then
+                UIManager:close(shell.results_menu_container)
+                shell.results_menu_container = nil
+            end
+            UIManager:setDirty(nil, "ui")
+            shell:openMenu(found_menu_items[i][3], animate)
+        end
+        local function item_callback(i)
+            local confirm_box
+            confirm_box = ConfirmBox:new{
+                text = found_menu_items[i][4],
+                icon = found_menu_items[i][2],
+                ok_text = _("Open"),
+                ok_callback = function()
+                    UIManager:close(confirm_box)
+                    open_menu(i)
+                end,
+                other_buttons = {{
+                    {
+                        text = _("Walk me there"),
+                        callback = function()
+                            UIManager:close(confirm_box)
+                            open_menu(i, true)
+                        end,
+                    },
+                }},
+            }
+            UIManager:show(confirm_box)
+        end
+        if #found_menu_items == 0 then
+            UIManager:show(InfoMessage:new{
+                text = T(_("No menus containing '%1' found."), search_string),
+            })
+            return
+        end
+        local result_items = {}
+        for i = 1, #found_menu_items do
+            result_items[#result_items + 1] = {
+                text = found_menu_items[i][1],
+                callback = function()
+                    item_callback(i)
+                end,
+                hold_callback = function()
+                    open_menu(i)
+                end,
+            }
+        end
+        local screen_size = Screen:getSize()
+        local results_menu = Menu:new{
+            title = _("Search results"),
+            subtitle = T(_("Query: %1"), search_string),
+            item_table = result_items,
+            width = math.floor(screen_size.w * 0.9),
+            height = math.floor(screen_size.h * 0.9),
+            single_line = true,
+            items_per_page = 10,
+            items_font_size = Menu.getItemFontSize(10),
+            -- Called as menu:onMenuSelect(entry, ges). The entry is the second argument.
+            onMenuSelect = function(_, entry)
+                if entry and entry.callback then
+                    entry.callback()
+                end
+            end,
+            onMenuHold = function(_, entry)
+                if entry and entry.hold_callback then
+                    entry.hold_callback()
+                end
+            end,
+            close_callback = function()
+                if shell.results_menu_container then
+                    UIManager:close(shell.results_menu_container)
+                    shell.results_menu_container = nil
+                end
+            end,
+        }
+        shell.results_menu_container = CenterContainer:new{
+            dimen = screen_size,
+            results_menu,
+        }
+        results_menu.show_parent = shell.results_menu_container
+        UIManager:show(shell.results_menu_container)
+    end
+
+    local search_dialog
+    search_dialog = InputDialog:new{
+        title = _("Search menu entry"),
+        description = _("Search for a menu entry containing the following text (case insensitive)."),
+        input = G_reader_settings:readSetting("menu_search_string", _("Help")),
+        buttons = {
+            {
+                {
+                    text = _("Cancel"),
+                    id = "close",
+                    callback = function()
+                        UIManager:close(search_dialog)
+                    end,
+                },
+                {
+                    text = _("Search"),
+                    is_enter_default = true,
+                    callback = function()
+                        local search_for = Utf8Proc.lowercase(search_dialog:getInputText() or "")
+                        G_reader_settings:saveSetting("menu_search_string", search_for)
+                        UIManager:close(search_dialog)
+                        show_search_results(search_for)
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(search_dialog)
+    search_dialog:onShowKeyboard()
     return true
 end
 

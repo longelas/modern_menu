@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.12.0 — 2026-10-30
+
+Menu search opens again, toggles stay intact while a long list scrolls, and the Files tab is back when Kobold is installed.
+
+### Changes
+- **Menu search** under Home → Help opens the text box. A result can be opened, or the menu can walk to that entry
+- In a long list such as User plugins, the switch thumb stays inside the track while you scroll. The scrollbar responds as soon as the list is open
+- With Kobold installed, the **Files** tab is in the menu again. It closes Kobold and, from a book, leaves the book on the file list
+
 ## 1.11.0 — 2026-10-26
 
 The menu refreshes a smaller part of the screen, so an e-ink update finishes sooner.

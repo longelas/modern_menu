@@ -28,7 +28,12 @@ function ToggleSwitch:init()
 end
 
 function ToggleSwitch:getSize()
-    return self.dimen
+    -- A fresh size. The painted dimen carries screen coordinates, and a
+    -- parent that keeps that table would shift the next layout.
+    return Geom:new{
+        w = self.width,
+        h = self.height,
+    }
 end
 
 function ToggleSwitch:paintTo(bb, x, y)
@@ -48,10 +53,14 @@ function ToggleSwitch:paintTo(bb, x, y)
         bb:paintBorder(x, y, w, h, bw, ink, r)
     end
 
+    -- Same fill as the track. paintCircle goes through per-pixel rotation
+    -- and, once this row is scrolled into the offscreen buffer, lands the
+    -- thumb in a column of its own. Kindle shows that as a dot beside the name.
     local thumb_r = math.max(2, r - Screen:scaleBySize(3))
     local cx = checked and (x + w - r) or (x + r)
     local cy = y + r
-    bb:paintCircle(cx, cy, thumb_r, checked and Blitbuffer.COLOR_WHITE or ink)
+    local color = checked and Blitbuffer.COLOR_WHITE or ink
+    bb:paintRoundedRect(cx - thumb_r, cy - thumb_r, thumb_r * 2, thumb_r * 2, color, thumb_r)
 end
 
 return ToggleSwitch
