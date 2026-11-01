@@ -269,18 +269,151 @@ function ModernMenu:addToMainMenu(menu_items)
         sorting_hint = "more_tools",
         sub_item_table = {
             {
-                text = _("Status bar in file browser"),
-                checked_func = function()
-                    return StatusBar.elsewhereEnabled()
-                end,
-                keep_menu_open = true,
-                callback = function(touchmenu_instance)
-                    StatusBar.setElsewhereEnabled(not StatusBar.elsewhereEnabled())
-                    if touchmenu_instance then
-                        touchmenu_instance:updateItems()
-                    end
-                end,
+                text = _("Layout"),
+                sub_item_table = {
+                    {
+                        text_func = function()
+                            local mode = Settings.getMenuHeightMode()
+                            if mode == Settings.MENU_HEIGHT_CONTENT then
+                                return _("Menu height: Fit content")
+                            end
+                            if mode == Settings.MENU_HEIGHT_PERCENT then
+                                return T(_("Menu height: %1% of screen"), Settings.getMenuHeightPercent())
+                            end
+                            return _("Menu height: Full screen")
+                        end,
+                        sub_item_table = {
+                            {
+                                text = _("Full screen"),
+                                checked_func = function()
+                                    return Settings.getMenuHeightMode() == Settings.MENU_HEIGHT_FULL
+                                end,
+                                radio = true,
+                                keep_menu_open = true,
+                                callback = function(touchmenu_instance)
+                                    Settings.setMenuHeightMode(Settings.MENU_HEIGHT_FULL)
+                                    if touchmenu_instance then
+                                        touchmenu_instance:updateItems()
+                                    end
+                                end,
+                            },
+                            {
+                                text = _("Fit content"),
+                                checked_func = function()
+                                    return Settings.getMenuHeightMode() == Settings.MENU_HEIGHT_CONTENT
+                                end,
+                                radio = true,
+                                keep_menu_open = true,
+                                callback = function(touchmenu_instance)
+                                    Settings.setMenuHeightMode(Settings.MENU_HEIGHT_CONTENT)
+                                    if touchmenu_instance then
+                                        touchmenu_instance:updateItems()
+                                    end
+                                end,
+                            },
+                            {
+                                text_func = function()
+                                    return T(_("Fixed percentage: %1%"), Settings.getMenuHeightPercent())
+                                end,
+                                checked_func = function()
+                                    return Settings.getMenuHeightMode() == Settings.MENU_HEIGHT_PERCENT
+                                end,
+                                radio = true,
+                                keep_menu_open = true,
+                                callback = function(touchmenu_instance)
+                                    local SpinWidget = require("ui/widget/spinwidget")
+                                    UIManager:show(SpinWidget:new{
+                                        title_text = _("Menu height"),
+                                        info_text = _("Height of the menu as a percentage of the screen. The menu stays at the top and scrolls when the rows do not fit."),
+                                        value = Settings.getMenuHeightPercent(),
+                                        value_min = Settings.MIN_MENU_HEIGHT_PERCENT,
+                                        value_max = Settings.MAX_MENU_HEIGHT_PERCENT,
+                                        default_value = Settings.DEFAULT_MENU_HEIGHT_PERCENT,
+                                        value_step = 5,
+                                        value_hold_step = 10,
+                                        -- Set stays available at 70. That number is both the
+                                        -- stored default and the value that turns this mode on.
+                                        ok_always_enabled = true,
+                                        ok_text = _("Set"),
+                                        callback = function(spin)
+                                            if not spin then return end
+                                            Settings.setMenuHeightPercent(spin.value)
+                                            Settings.setMenuHeightMode(Settings.MENU_HEIGHT_PERCENT)
+                                            if touchmenu_instance then
+                                                touchmenu_instance:updateItems()
+                                            end
+                                        end,
+                                    })
+                                end,
+                            },
+                        },
+                    },
+                    {
+                        text_func = function()
+                            local id = Settings.getDefaultTabId()
+                            if not id then
+                                return _("Default tab: Automatic")
+                            end
+                            local menu = self.ui and self.ui.menu
+                            local tabs = menu and menu.tab_item_table
+                            if type(tabs) == "table" then
+                                for i, tab in ipairs(tabs) do
+                                    if Settings.tabKey(tab) == id then
+                                        return T(_("Default tab: %1"), ModernMenuShell.tabCaption(tab, i, false))
+                                    end
+                                end
+                            end
+                            return T(_("Default tab: %1"), id)
+                        end,
+                        sub_item_table_func = function()
+                            return self:_defaultTabItems()
+                        end,
+                    },
+                    {
+                        text = _("Breadcrumbs at the bottom"),
+                        checked_func = function()
+                            return Settings.getBreadcrumbAtBottom()
+                        end,
+                        keep_menu_open = true,
+                        callback = function(touchmenu_instance)
+                            Settings.setBreadcrumbAtBottom(not Settings.getBreadcrumbAtBottom())
+                            if touchmenu_instance then
+                                touchmenu_instance:updateItems()
+                            end
+                        end,
+                    },
+                    {
+                        text_func = function()
+                            return T(_("Breadcrumb font size: %1"), Settings.getBreadcrumbFontSize())
+                        end,
+                        keep_menu_open = true,
+                        callback = function(touchmenu_instance)
+                            local SpinWidget = require("ui/widget/spinwidget")
+                            UIManager:show(SpinWidget:new{
+                                title_text = _("Breadcrumb font size"),
+                                info_text = _("Font size for the breadcrumb trail. Parent crumbs are slightly smaller."),
+                                value = Settings.getBreadcrumbFontSize(),
+                                value_min = Settings.MIN_BREADCRUMB_FONT_SIZE,
+                                value_max = Settings.MAX_BREADCRUMB_FONT_SIZE,
+                                default_value = Settings.DEFAULT_BREADCRUMB_FONT_SIZE,
+                                value_step = 1,
+                                value_hold_step = 2,
+                                ok_text = _("Set"),
+                                callback = function(spin)
+                                    if not spin then return end
+                                    Settings.setBreadcrumbFontSize(spin.value)
+                                    if touchmenu_instance then
+                                        touchmenu_instance:updateItems()
+                                    end
+                                end,
+                            })
+                        end,
+                    },
+                },
             },
+            {
+                text = _("Status bar"),
+                sub_item_table = {
             {
                 text = _("Hide status bar"),
                 checked_func = function()
@@ -313,14 +446,43 @@ function ModernMenu:addToMainMenu(menu_items)
                 end,
             },
             {
-                text_func = function()
-                    local name = Settings.getMenuFont()
-                    if not name then
-                        return _("Menu font: KOReader default")
-                    end
-                    return T(_("Menu font: %1"), name)
+                text = _("Status bar in file browser"),
+                checked_func = function()
+                    return StatusBar.elsewhereEnabled()
                 end,
-                sub_item_table_func = menu_font_items,
+                keep_menu_open = true,
+                callback = function(touchmenu_instance)
+                    StatusBar.setElsewhereEnabled(not StatusBar.elsewhereEnabled())
+                    if touchmenu_instance then
+                        touchmenu_instance:updateItems()
+                    end
+                end,
+            },
+                },
+            },
+            {
+                text = _("Tabs"),
+                sub_item_table = {
+            {
+                text = _("Icons only (hide tab labels)"),
+                checked_func = function()
+                    return Settings.getTabIconsOnly()
+                end,
+                keep_menu_open = true,
+                callback = function(touchmenu_instance)
+                    Settings.setTabIconsOnly(not Settings.getTabIconsOnly())
+                    -- Prefer a larger icon when switching to icons-only if still on the
+                    -- label-mode default, so phones get usable targets immediately.
+                    if Settings.getTabIconsOnly() then
+                        local current = Settings.getTabIconSize()
+                        if current == Settings.DEFAULT_TAB_ICON_SIZE then
+                            Settings.setTabIconSize(Settings.DEFAULT_TAB_ICON_SIZE_ICONS_ONLY)
+                        end
+                    end
+                    if touchmenu_instance then
+                        touchmenu_instance:updateItems()
+                    end
+                end,
             },
             {
                 text_func = function()
@@ -353,27 +515,6 @@ function ModernMenu:addToMainMenu(menu_items)
                 end,
             },
             {
-                text = _("Icons only (hide tab labels)"),
-                checked_func = function()
-                    return Settings.getTabIconsOnly()
-                end,
-                keep_menu_open = true,
-                callback = function(touchmenu_instance)
-                    Settings.setTabIconsOnly(not Settings.getTabIconsOnly())
-                    -- Prefer a larger icon when switching to icons-only if still on the
-                    -- label-mode default, so phones get usable targets immediately.
-                    if Settings.getTabIconsOnly() then
-                        local current = Settings.getTabIconSize()
-                        if current == Settings.DEFAULT_TAB_ICON_SIZE then
-                            Settings.setTabIconSize(Settings.DEFAULT_TAB_ICON_SIZE_ICONS_ONLY)
-                        end
-                    end
-                    if touchmenu_instance then
-                        touchmenu_instance:updateItems()
-                    end
-                end,
-            },
-            {
                 text_func = function()
                     return T(_("Tab icon size: %1"), Settings.getTabIconSize())
                 end,
@@ -401,6 +542,21 @@ function ModernMenu:addToMainMenu(menu_items)
                         end,
                     })
                 end,
+            },
+                },
+            },
+            {
+                text = _("Text"),
+                sub_item_table = {
+            {
+                text_func = function()
+                    local name = Settings.getMenuFont()
+                    if not name then
+                        return _("Menu font: KOReader default")
+                    end
+                    return T(_("Menu font: %1"), name)
+                end,
+                sub_item_table_func = menu_font_items,
             },
             {
                 text_func = function()
@@ -469,115 +625,6 @@ function ModernMenu:addToMainMenu(menu_items)
                     end
                 end,
             },
-            {
-                text_func = function()
-                    local id = Settings.getDefaultTabId()
-                    if not id then
-                        return _("Default tab: Automatic")
-                    end
-                    local menu = self.ui and self.ui.menu
-                    local tabs = menu and menu.tab_item_table
-                    if type(tabs) == "table" then
-                        for i, tab in ipairs(tabs) do
-                            if Settings.tabKey(tab) == id then
-                                return T(_("Default tab: %1"), ModernMenuShell.tabCaption(tab, i, false))
-                            end
-                        end
-                    end
-                    return T(_("Default tab: %1"), id)
-                end,
-                sub_item_table_func = function()
-                    return self:_defaultTabItems()
-                end,
-            },
-            {
-                text = _("Breadcrumbs at the bottom"),
-                checked_func = function()
-                    return Settings.getBreadcrumbAtBottom()
-                end,
-                keep_menu_open = true,
-                callback = function(touchmenu_instance)
-                    Settings.setBreadcrumbAtBottom(not Settings.getBreadcrumbAtBottom())
-                    if touchmenu_instance then
-                        touchmenu_instance:updateItems()
-                    end
-                end,
-            },
-            {
-                text_func = function()
-                    local mode = Settings.getMenuHeightMode()
-                    if mode == Settings.MENU_HEIGHT_CONTENT then
-                        return _("Menu height: Fit content")
-                    end
-                    if mode == Settings.MENU_HEIGHT_PERCENT then
-                        return T(_("Menu height: %1% of screen"), Settings.getMenuHeightPercent())
-                    end
-                    return _("Menu height: Full screen")
-                end,
-                sub_item_table = {
-                    {
-                        text = _("Full screen"),
-                        checked_func = function()
-                            return Settings.getMenuHeightMode() == Settings.MENU_HEIGHT_FULL
-                        end,
-                        radio = true,
-                        keep_menu_open = true,
-                        callback = function(touchmenu_instance)
-                            Settings.setMenuHeightMode(Settings.MENU_HEIGHT_FULL)
-                            if touchmenu_instance then
-                                touchmenu_instance:updateItems()
-                            end
-                        end,
-                    },
-                    {
-                        text = _("Fit content"),
-                        checked_func = function()
-                            return Settings.getMenuHeightMode() == Settings.MENU_HEIGHT_CONTENT
-                        end,
-                        radio = true,
-                        keep_menu_open = true,
-                        callback = function(touchmenu_instance)
-                            Settings.setMenuHeightMode(Settings.MENU_HEIGHT_CONTENT)
-                            if touchmenu_instance then
-                                touchmenu_instance:updateItems()
-                            end
-                        end,
-                    },
-                    {
-                        text_func = function()
-                            return T(_("Fixed percentage: %1%"), Settings.getMenuHeightPercent())
-                        end,
-                        checked_func = function()
-                            return Settings.getMenuHeightMode() == Settings.MENU_HEIGHT_PERCENT
-                        end,
-                        radio = true,
-                        keep_menu_open = true,
-                        callback = function(touchmenu_instance)
-                            local SpinWidget = require("ui/widget/spinwidget")
-                            UIManager:show(SpinWidget:new{
-                                title_text = _("Menu height"),
-                                info_text = _("Height of the menu as a percentage of the screen. The menu stays at the top and scrolls when the rows do not fit."),
-                                value = Settings.getMenuHeightPercent(),
-                                value_min = Settings.MIN_MENU_HEIGHT_PERCENT,
-                                value_max = Settings.MAX_MENU_HEIGHT_PERCENT,
-                                default_value = Settings.DEFAULT_MENU_HEIGHT_PERCENT,
-                                value_step = 5,
-                                value_hold_step = 10,
-                                -- Set stays available at 70. That number is both the
-                                -- stored default and the value that turns this mode on.
-                                ok_always_enabled = true,
-                                ok_text = _("Set"),
-                                callback = function(spin)
-                                    if not spin then return end
-                                    Settings.setMenuHeightPercent(spin.value)
-                                    Settings.setMenuHeightMode(Settings.MENU_HEIGHT_PERCENT)
-                                    if touchmenu_instance then
-                                        touchmenu_instance:updateItems()
-                                    end
-                                end,
-                            })
-                        end,
-                    },
                 },
             },
             {

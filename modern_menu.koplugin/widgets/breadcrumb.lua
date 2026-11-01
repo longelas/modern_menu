@@ -59,11 +59,13 @@ function Breadcrumb:_rebuild()
     local sep = " › "
     -- Budget width across crumbs; keep current readable
     local max_total = self.width
+    local current_size = Settings.getBreadcrumbFontSize()
+    local parent_size = Settings.getBreadcrumbParentFontSize()
     for i, name in ipairs(self.crumbs) do
         local is_last = (i == n)
         local label = TextWidget:new{
             text = tostring(name),
-            face = Settings.face(is_last and 16 or 15, "cfont"),
+            face = Settings.face(is_last and current_size or parent_size, "cfont"),
             bold = is_last,
             fgcolor = is_last and Blitbuffer.COLOR_BLACK or Settings.getMutedFg(),
             max_width = math.floor(max_total / math.max(n, 1)),
@@ -76,7 +78,7 @@ function Breadcrumb:_rebuild()
         if not is_last then
             table.insert(row, TextWidget:new{
                 text = sep,
-                face = Settings.face(15, "cfont"),
+                face = Settings.face(parent_size, "cfont"),
                 fgcolor = Settings.getMutedFg(),
             })
         end
@@ -154,7 +156,9 @@ end
 
 function Breadcrumb:setCrumbs(crumbs)
     crumbs = crumbs or {}
-    local key = tostring(self.width) .. "\0" .. table.concat(crumbs, "\0")
+    local key = tostring(self.width)
+        .. "\0" .. tostring(Settings.getBreadcrumbFontSize())
+        .. "\0" .. table.concat(crumbs, "\0")
     if key == self._crumb_key and self[1] then
         return
     end

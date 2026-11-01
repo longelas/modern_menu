@@ -315,6 +315,7 @@ function ModernMenuShell:init()
 
     -- Fixed list viewport under chrome; scroll when items overflow
     local header_h = chrome_btn_h + Screen:scaleBySize(4)
+    self._header_pad = Screen:scaleBySize(4)
     self._header_h = header_h
     local tabs_h = self.tab_bar.height + Screen:scaleBySize(4)
     local rule_h = Screen:scaleBySize(2) + self._tab_rule_gap + Screen:scaleBySize(6)
@@ -842,6 +843,7 @@ function ModernMenuShell:_layoutSignature()
         Settings.getMenuHeightMode(),
         tostring(Settings.getMenuHeightPercent()),
         Settings.getBreadcrumbAtBottom() and "1" or "0",
+        tostring(Settings.getBreadcrumbFontSize()),
     }, "|")
 end
 
@@ -1723,11 +1725,40 @@ function ModernMenuShell:_syncStatusBar()
     end
 end
 
+--- The title row grows with the breadcrumb type so a larger trail is not clipped.
+function ModernMenuShell:_syncHeaderBandHeight()
+    local sample = TextWidget:new{
+        text = "Ag",
+        face = Settings.face(Settings.getBreadcrumbFontSize(), "cfont"),
+        bold = true,
+    }
+    local text_h = sample:getSize().h
+    sample:free()
+    local back_h = self._back_icon and self._back_icon:getSize().h or 0
+    local row_h = math.max(text_h, back_h, Screen:scaleBySize(22))
+    local pad = self._header_pad or Screen:scaleBySize(4)
+    self._header_h = row_h + pad
+    local function set_h(widget)
+        if widget and widget.dimen then
+            widget.dimen.h = row_h
+        end
+    end
+    set_h(self.header_row and self.header_row[3])
+    set_h(self._close_icon)
+    set_h(self._header_close_slot)
+    set_h(self.header_overlap)
+    set_h(self.header_overlap and self.header_overlap[1])
+    if self.header and self.header.dimen then
+        self.header.dimen.h = self._header_h
+    end
+end
+
 function ModernMenuShell:_applyChromeFont()
     -- The chevron belongs to a submenu. The root title starts at the left inset.
     if not self.header_row then
         return
     end
+    self:_syncHeaderBandHeight()
     local nested = #(self.item_table_stack or {}) > 0
     self.header_row[1] = nested and self._back_icon or self._back_placeholder
     if self.header_row[2] then

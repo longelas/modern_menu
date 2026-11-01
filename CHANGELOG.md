@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.15.0 — 2026-11-01
+
+The breadcrumb trail has its own font size, and the plugin settings are grouped.
+
+### Changes
+- **Breadcrumb font size** in Layout sets the trail. Parent crumbs stay one step smaller, and the title row grows so a larger trail is not clipped
+- Settings are grouped into Layout, Status bar, Tabs, and Text. Reset and the stock menu stay at the bottom
+
 ## 1.14.0 — 2026-11-01
 
 A tap on a breadcrumb opens that menu.

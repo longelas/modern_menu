@@ -23,6 +23,7 @@ local KEY_MENU_HEIGHT_PERCENT = "modern_menu_height_percent"
 local KEY_HIDE_STATUS_BAR = "modern_menu_hide_status_bar"
 local KEY_BATTERY_PERCENT = "modern_menu_battery_percent"
 local KEY_BREADCRUMB_BOTTOM = "modern_menu_breadcrumb_bottom"
+local KEY_BREADCRUMB_FONT_SIZE = "modern_menu_breadcrumb_font_size"
 
 -- Defaults tuned for a compact header. The minimums sit below those
 -- defaults so a smaller label or icon can still be chosen.
@@ -38,6 +39,11 @@ Settings.MAX_TAB_ICON_SIZE = 40
 Settings.DEFAULT_OPTION_FONT_SIZE = 17
 Settings.MIN_OPTION_FONT_SIZE = 8
 Settings.MAX_OPTION_FONT_SIZE = 28
+
+-- Current crumb. The parent crumbs are one step smaller.
+Settings.DEFAULT_BREADCRUMB_FONT_SIZE = 16
+Settings.MIN_BREADCRUMB_FONT_SIZE = 10
+Settings.MAX_BREADCRUMB_FONT_SIZE = 28
 
 -- Vertical padding inside each option row (unscaled logical units).
 -- Negative values tighten rows below the default minimum height.
@@ -451,6 +457,32 @@ function Settings.setBreadcrumbAtBottom(enabled)
     write(KEY_BREADCRUMB_BOTTOM, enabled and true or false)
 end
 
+function Settings.getBreadcrumbFontSize()
+    return clamp_int(
+        read(KEY_BREADCRUMB_FONT_SIZE, Settings.DEFAULT_BREADCRUMB_FONT_SIZE),
+        Settings.MIN_BREADCRUMB_FONT_SIZE,
+        Settings.MAX_BREADCRUMB_FONT_SIZE,
+        Settings.DEFAULT_BREADCRUMB_FONT_SIZE
+    )
+end
+
+function Settings.setBreadcrumbFontSize(size)
+    write(KEY_BREADCRUMB_FONT_SIZE, clamp_int(
+        size,
+        Settings.MIN_BREADCRUMB_FONT_SIZE,
+        Settings.MAX_BREADCRUMB_FONT_SIZE,
+        Settings.DEFAULT_BREADCRUMB_FONT_SIZE
+    ))
+end
+
+--- Parent crumbs and the separator sit one step below the current crumb.
+function Settings.getBreadcrumbParentFontSize()
+    return math.max(
+        Settings.MIN_BREADCRUMB_FONT_SIZE,
+        Settings.getBreadcrumbFontSize() - 1
+    )
+end
+
 function Settings.getPureBlack()
     return read(KEY_PURE_BLACK, false) and true or false
 end
@@ -537,6 +569,8 @@ function Settings.resetToDefaults()
     Settings.setMenuHeightPercent(Settings.DEFAULT_MENU_HEIGHT_PERCENT)
     Settings.setMenuHeightMode(Settings.MENU_HEIGHT_CONTENT)
     Settings.setDefaultTabId(nil)
+    Settings.setBreadcrumbAtBottom(false)
+    Settings.setBreadcrumbFontSize(Settings.DEFAULT_BREADCRUMB_FONT_SIZE)
     local font = Settings.defaultMenuFont()
     if font then
         Settings.setMenuFont(font)
