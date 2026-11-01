@@ -89,6 +89,18 @@ local ID_TAB_LABELS = {
     kobold_home = _("Kobold"),
 }
 
+-- These open KOReader's own book screens. The menu has to close first,
+-- otherwise that screen is stacked under it and a chapter or bookmark
+-- tap only flashes.
+local READER_NAV_CLOSES = {
+    table_of_contents = true,
+    bookmarks = true,
+    book_map = true,
+    page_browser = true,
+    go_to = true,
+    skim_to = true,
+}
+
 local ModernMenuShell = InputContainer:extend{
     name = "modern_menu_shell",
     modal = true,
@@ -367,6 +379,8 @@ function ModernMenuShell:init()
     self.cropping_widget = self.scroll_container
     -- Quick Menu footer sits under the list and is empty on other tabs.
     self.qm_footer_slot = VerticalGroup:new{ align = "center" }
+    -- Swapped with the header when breadcrumbs sit at the bottom.
+    self._header_gap = VerticalSpan:new{ width = 0 }
     -- Bottom edge of a short sheet. Full screen hides the gap and the line.
     self._sheet_edge_gap = Screen:scaleBySize(10)
     self._sheet_edge_h = math.max(Size.line.thick, Screen:scaleBySize(3))
@@ -395,6 +409,7 @@ function ModernMenuShell:init()
             self.tab_rule,
             self.scroll_container,
             self.qm_footer_slot,
+            self._header_gap,
             self.sheet_edge_gap,
             self.sheet_edge,
         },
@@ -424,11 +439,12 @@ function ModernMenuShell:init()
     }
     -- Gesture handlers are called as (self, args, ges). The gesture is third.
     self.chrome_hit.onTapChromeHit = function(_, _, ges)
-        if not ges or not ges.pos then
+        if not ges or not ges.pos or not self.chrome_hit.dimen then
             return false
         end
-        local top = self.status_h or 0
-        if ges.pos.y < top or ges.pos.y > top + self.chrome_h then
+        local top = self.chrome_hit.dimen.y or 0
+        local band_h = self.chrome_hit.dimen.h or self.chrome_h
+        if ges.pos.y < top or ges.pos.y > top + band_h then
             return false
         end
         if self._status_hidden and self._close_zone then
@@ -485,14 +501,46 @@ function ModernMenuShell:init()
         return true
     end
 
+    -- A right-to-left swipe on the chrome (tabs, breadcrumbs, status).
+    -- The list handles the same swipe itself, because it sees the gesture
+    -- before this layer does. Swipes below a short sheet are left alone.
+    local swipe_range = Geom:new{
+        x = 0, y = 0,
+        w = self.dimen.w,
+        h = self.dimen.h,
+    }
+    self.swipe_hit = InputContainer:new{
+        dimen = swipe_range,
+        skip_paint = true,
+        ges_events = {
+            SwipeBack = {
+                GestureRange:new{
+                    ges = "swipe",
+                    range = swipe_range,
+                },
+            },
+        },
+    }
+    self.swipe_hit.onSwipeBack = function(_, _, ges)
+        if not self:_isBackSwipe(ges) then
+            return false
+        end
+        if ges.pos and self._sheet_h and ges.pos.y > self._sheet_h then
+            return false
+        end
+        return self:backToUpperMenu()
+    end
+
     -- dismiss_hit first so a tap below the sheet closes before the rows see it.
     -- chrome_hit stays ahead of the panel so the corner zones win over the glyphs.
+    -- swipe_hit is last so a list or Quick Menu swipe is handled there first.
     self[1] = OverlapGroup:new{
         dimen = self.dimen,
         allow_mirroring = false,
         self.dismiss_hit,
         self.chrome_hit,
         self.panel,
+        self.swipe_hit,
     }
 
     self._layout_sig = self:_layoutSignature()
@@ -639,20 +687,80 @@ function ModernMenuShell:_emptyNotice(text)
 end
 
 --- Status bar, title, tabs, and the rule under them.
+-- The breadcrumb band is top chrome, or a reserved strip at the bottom.
 function ModernMenuShell:_chromeHeight()
-    local header_h = self._header_h or 0
+    local header_h = Settings.getBreadcrumbAtBottom() and 0 or (self._header_h or 0)
     local tabs_h = (self.tab_bar and self.tab_bar.height or 0) + Screen:scaleBySize(4)
     local rule_h = Screen:scaleBySize(2) + (self._tab_rule_gap or Screen:scaleBySize(6)) + Screen:scaleBySize(6)
     return (self.status_h or 0) + header_h + tabs_h + rule_h + Screen:scaleBySize(4)
 end
 
+--- Height of the breadcrumb row when it is parked under the list.
+function ModernMenuShell:_bottomBandHeight()
+    if Settings.getBreadcrumbAtBottom() then
+        return self._header_h or 0
+    end
+    return 0
+end
+
+--- Right-to-left swipe, including a slightly diagonal one.
+-- A mirrored layout flips it so the gesture still moves toward the back.
+function ModernMenuShell:_isBackSwipe(ges)
+    if not ges or not ges.direction then
+        return false
+    end
+    local dir = ges.direction
+    if BD.mirroredUILayout() then
+        return dir == "east" or dir == "northeast" or dir == "southeast"
+    end
+    return dir == "west" or dir == "northwest" or dir == "southwest"
+end
+
+--- Header row at the top, or in a strip under the list.
+function ModernMenuShell:_placeBreadcrumbBand()
+    local column = self.panel and self.panel[1]
+    if not column or not self.header or not self._header_gap then
+        return
+    end
+    if Settings.getBreadcrumbAtBottom() then
+        column[2] = self._header_gap
+        column[7] = self.header
+    else
+        column[2] = self.header
+        column[7] = self._header_gap
+    end
+end
+
+--- Back and close hit target follows the breadcrumb row.
+function ModernMenuShell:_placeChromeHit()
+    if not self.chrome_hit or not self.chrome_hit.dimen then
+        return
+    end
+    local y
+    if Settings.getBreadcrumbAtBottom() then
+        local sheet = self._sheet_h or (self.dimen and self.dimen.h) or 0
+        local edge = 0
+        if Settings.getMenuHeightMode() ~= Settings.MENU_HEIGHT_FULL then
+            edge = (self._sheet_edge_gap or 0) + (self._sheet_edge_h or 0)
+        end
+        y = math.max(0, sheet - edge - (self._header_h or 0))
+    else
+        y = self.status_h or 0
+    end
+    self.chrome_hit.dimen.y = y
+    self.chrome_hit.dimen.h = self._header_h or self.chrome_h
+end
+
 --- White sheet height. Full screen, a percentage of the screen, or the rows.
 -- The list scrolls when the rows are taller than the sheet. A short sheet
 -- stays at the top; a tap below it closes the menu.
+-- Breadcrumbs at the bottom keep their own strip, including on a full sheet.
 function ModernMenuShell:_applySheetHeight(footer_h)
     footer_h = footer_h or 0
+    self:_placeBreadcrumbBand()
     local screen_h = (self.dimen and self.dimen.h) or Screen:getHeight()
     local chrome_h = self:_chromeHeight()
+    local band_h = self:_bottomBandHeight()
     local mode = Settings.getMenuHeightMode()
     local edge_h = 0
     local edge_gap = 0
@@ -670,12 +778,12 @@ function ModernMenuShell:_applySheetHeight(footer_h)
         self.sheet_edge.background = Blitbuffer.COLOR_BLACK
     end
     local min_list = Screen:scaleBySize(mode == Settings.MENU_HEIGHT_FULL and 120 or 80)
-    local max_list = math.max(min_list, screen_h - chrome_h - footer_h - edge_h)
+    local max_list = math.max(min_list, screen_h - chrome_h - footer_h - edge_h - band_h)
     local list_h = max_list
     if mode == Settings.MENU_HEIGHT_PERCENT then
         local sheet = math.floor(screen_h * Settings.getMenuHeightPercent() / 100)
-        sheet = math.max(chrome_h + min_list + edge_h, math.min(screen_h, sheet))
-        list_h = math.max(min_list, sheet - chrome_h - footer_h - edge_h)
+        sheet = math.max(chrome_h + min_list + edge_h + band_h, math.min(screen_h, sheet))
+        list_h = math.max(min_list, sheet - chrome_h - footer_h - edge_h - band_h)
     elseif mode == Settings.MENU_HEIGHT_CONTENT then
         local content_h = 0
         local body = self.scroll_container and self.scroll_container[1]
@@ -688,8 +796,8 @@ function ModernMenuShell:_applySheetHeight(footer_h)
         end
         list_h = math.min(max_list, math.max(min_list, content_h))
     end
-    local sheet_h = math.min(screen_h, chrome_h + list_h + footer_h + edge_h)
-    list_h = math.max(1, sheet_h - chrome_h - footer_h - edge_h)
+    local sheet_h = math.min(screen_h, chrome_h + list_h + footer_h + edge_h + band_h)
+    list_h = math.max(1, sheet_h - chrome_h - footer_h - edge_h - band_h)
     self._sheet_h = sheet_h
     if self.list_dimen then
         self.list_dimen.h = list_h
@@ -703,6 +811,11 @@ function ModernMenuShell:_applySheetHeight(footer_h)
             self.panel.dimen.h = sheet_h
         end
     end
+    local column = self.panel and self.panel[1]
+    if column and column.resetLayout then
+        column:resetLayout()
+    end
+    self:_placeChromeHit()
 end
 
 function ModernMenuShell:_layoutSignature()
@@ -716,6 +829,7 @@ function ModernMenuShell:_layoutSignature()
         Settings.getMenuFont() or "",
         Settings.getMenuHeightMode(),
         tostring(Settings.getMenuHeightPercent()),
+        Settings.getBreadcrumbAtBottom() and "1" or "0",
     }, "|")
 end
 
@@ -752,17 +866,18 @@ function ModernMenuShell:_listViewport(footer_h)
     footer_h = footer_h or 0
     local screen_h = (self.dimen and self.dimen.h) or Screen:getHeight()
     local chrome_h = self:_chromeHeight()
+    local band_h = self:_bottomBandHeight()
     local mode = Settings.getMenuHeightMode()
     local edge_h = 0
     if mode ~= Settings.MENU_HEIGHT_FULL then
         edge_h = (self._sheet_edge_gap or 0) + (self._sheet_edge_h or 0)
     end
     local min_list = Screen:scaleBySize(mode == Settings.MENU_HEIGHT_FULL and 120 or 80)
-    local max_list = math.max(min_list, screen_h - chrome_h - footer_h - edge_h)
+    local max_list = math.max(min_list, screen_h - chrome_h - footer_h - edge_h - band_h)
     if mode == Settings.MENU_HEIGHT_PERCENT then
         local sheet = math.floor(screen_h * Settings.getMenuHeightPercent() / 100)
-        sheet = math.max(chrome_h + min_list + edge_h, math.min(screen_h, sheet))
-        return math.max(min_list, sheet - chrome_h - footer_h - edge_h)
+        sheet = math.max(chrome_h + min_list + edge_h + band_h, math.min(screen_h, sheet))
+        return math.max(min_list, sheet - chrome_h - footer_h - edge_h - band_h)
     end
     return max_list
 end
@@ -1322,6 +1437,25 @@ function ModernMenuShell:_installScrollCoalesce()
     end
     sc._mm_coalesce_installed = true
     local shell = self
+    -- The scroller listens on onScrollableSwipe, not onSwipe, and its
+    -- range is the whole screen. A long submenu is scrollable, so a
+    -- right-to-left flick was taken as a horizontal page and back never
+    -- ran. A short list returns false here, and the chrome layer handles it.
+    local orig_swipe = sc.onScrollableSwipe
+    sc.onScrollableSwipe = function(container, arg, ges)
+        if shell:_isBackSwipe(ges) then
+            local pos = ges and ges.pos
+            if not pos or not container.dimen or not pos.intersectWith
+                or not pos:intersectWith(container.dimen) then
+                return false
+            end
+            return shell:backToUpperMenu()
+        end
+        if orig_swipe then
+            return orig_swipe(container, arg, ges)
+        end
+        return false
+    end
     local orig_scroll = sc._scrollBy
     sc._scrollBy = function(container, dx, dy, ensure_scroll_steps)
         if container._mm_in_reflow then
@@ -1568,7 +1702,7 @@ function ModernMenuShell:_syncStatusBar()
         end
     end
     if self.chrome_hit and self.chrome_hit.dimen then
-        self.chrome_hit.dimen.y = self.status_h or 0
+        self:_placeChromeHit()
     end
     self:_applyHeaderClose()
     self:_applyChromeFont()
@@ -1961,10 +2095,18 @@ function ModernMenuShell:onMenuSelect(item)
 
     local callback = item.callback_func and item.callback_func() or item.callback
     if callback then
-        -- Pass our shell as touchmenu_instance (closeMenu / updateItems)
+        -- Pass our shell as touchmenu_instance (closeMenu / updateItems).
+        -- Book navigation opens KOReader's own screen. Drop the menu first
+        -- so that screen is what the reader sees.
+        if item.id and READER_NAV_CLOSES[item.id] then
+            self:closeMenu()
+        end
         local stack_n = UIManager._window_stack and #UIManager._window_stack or 0
         self._did_update = false
         callback(self)
+        if self._closing then
+            return true
+        end
         local opened_dialog = UIManager._window_stack
             and #UIManager._window_stack > stack_n
         if item.checked or item.checked_func then

@@ -22,6 +22,7 @@ local KEY_MENU_HEIGHT_MODE = "modern_menu_height_mode"
 local KEY_MENU_HEIGHT_PERCENT = "modern_menu_height_percent"
 local KEY_HIDE_STATUS_BAR = "modern_menu_hide_status_bar"
 local KEY_BATTERY_PERCENT = "modern_menu_battery_percent"
+local KEY_BREADCRUMB_BOTTOM = "modern_menu_breadcrumb_bottom"
 
 -- Defaults tuned for a compact header. The minimums sit below those
 -- defaults so a smaller label or icon can still be chosen.
@@ -440,6 +441,14 @@ end
 
 function Settings.setBatteryPercent(enabled)
     write(KEY_BATTERY_PERCENT, enabled and true or false)
+end
+
+function Settings.getBreadcrumbAtBottom()
+    return read(KEY_BREADCRUMB_BOTTOM, false) and true or false
+end
+
+function Settings.setBreadcrumbAtBottom(enabled)
+    write(KEY_BREADCRUMB_BOTTOM, enabled and true or false)
 end
 
 function Settings.getPureBlack()

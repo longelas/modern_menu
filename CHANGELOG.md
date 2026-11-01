@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.13.0 — 2026-11-01
+
+A swipe steps back through the menu, the breadcrumbs can sit at the bottom, and the book's own navigation screens open on their own.
+
+### Changes
+- A right-to-left swipe returns to the parent menu. On the top menu, the same swipe closes it. This still works when the list is long enough to scroll
+- **Breadcrumbs at the bottom** in Modern Menu settings moves the trail under the list. On a full-screen menu that row keeps its own space at the bottom
+- Table of contents, Bookmarks, Book map, Page browser, Go to page, and Skim document close the menu, so KOReader's own screens are what you use to move through the book
+
 ## 1.12.0 — 2026-10-30
 
 Menu search opens again, toggles stay intact while a long list scrolls, and the Files tab is back when Kobold is installed.

@@ -491,6 +491,19 @@ function ModernMenu:addToMainMenu(menu_items)
                 end,
             },
             {
+                text = _("Breadcrumbs at the bottom"),
+                checked_func = function()
+                    return Settings.getBreadcrumbAtBottom()
+                end,
+                keep_menu_open = true,
+                callback = function(touchmenu_instance)
+                    Settings.setBreadcrumbAtBottom(not Settings.getBreadcrumbAtBottom())
+                    if touchmenu_instance then
+                        touchmenu_instance:updateItems()
+                    end
+                end,
+            },
+            {
                 text_func = function()
                     local mode = Settings.getMenuHeightMode()
                     if mode == Settings.MENU_HEIGHT_CONTENT then
