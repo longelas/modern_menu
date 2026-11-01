@@ -417,7 +417,8 @@ function ModernMenuShell:init()
 
     -- Wide hit target for the back chevron. Close is a status-bar icon,
     -- or the right side of this row when the bar is hidden.
-    local chrome_zone = chrome_edge_pad + back_w + chrome_gap + Screen:scaleBySize(16)
+    -- Stop at the gap before the trail, so a tap on a crumb is not the chevron.
+    local chrome_zone = chrome_edge_pad + back_w + math.floor(chrome_gap / 2)
     self._chrome_zone = chrome_zone
     self.chrome_h = header_h
     local chrome_dimen = Geom:new{
@@ -460,9 +461,17 @@ function ModernMenuShell:init()
                 return true
             end
         end
-        if #self.item_table_stack > 0 and ges.pos.x <= self._chrome_zone then
-            self:backToUpperMenu()
-            return true
+        if #self.item_table_stack > 0 and self._chrome_zone then
+            local on_back
+            if BD.mirroredUILayout() then
+                on_back = ges.pos.x >= self.dimen.w - self._chrome_zone
+            else
+                on_back = ges.pos.x <= self._chrome_zone
+            end
+            if on_back then
+                self:backToUpperMenu()
+                return true
+            end
         end
         return false
     end
@@ -615,6 +624,9 @@ function ModernMenuShell:goToCrumb(index)
     end
     -- crumb 1 = tab root; crumb k maps to title_stack depth k-1
     local target_depth = index - 1
+    if target_depth >= #self.title_stack then
+        return
+    end
     while #self.title_stack > target_depth do
         self.item_table = table.remove(self.item_table_stack)
         table.remove(self.title_stack)

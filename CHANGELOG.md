@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.14.0 — 2026-11-01
+
+A tap on a breadcrumb opens that menu.
+
+### Changes
+- Tapping a parent in the trail jumps straight to that menu, including the levels in between. The crumb for the menu already on screen stays put
+- The separator after a name counts as part of that crumb. The back chevron no longer covers the start of the first crumb
+
 ## 1.13.0 — 2026-11-01
 
 A swipe steps back through the menu, the breadcrumbs can sit at the bottom, and the book's own navigation screens open on their own.

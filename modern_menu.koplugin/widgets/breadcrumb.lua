@@ -4,6 +4,7 @@ Parents are tappable to jump back; current crumb is bold.
 @module modern_menu.widgets.breadcrumb
 --]]
 
+local BD = require("ui/bidi")
 local Blitbuffer = require("ffi/blitbuffer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
@@ -50,6 +51,7 @@ function Breadcrumb:_rebuild()
     local n = #self.crumbs
     if n == 0 then
         self[1] = row
+        self.hit_rects = nil
         self.dimen = Geom:new{ w = self.width, h = Screen:scaleBySize(20) }
         return
     end
@@ -81,10 +83,73 @@ function Breadcrumb:_rebuild()
     end
 
     self[1] = row
+    self.hit_rects = nil
     self.dimen = Geom:new{
         w = self.width,
         h = math.max(Screen:scaleBySize(22), row:getSize().h),
     }
+end
+
+--- Text labels do not keep a screen position. Record each crumb from
+-- the row's layout once it has been painted.
+function Breadcrumb:_cacheHitRects()
+    self.hit_rects = {}
+    local row = self[1]
+    if not row or not row._offsets or not row._size or not self.dimen then
+        return
+    end
+    local size = row._size
+    local origin_x = self.dimen.x or 0
+    local origin_y = self.dimen.y or 0
+    if self.align == "center" then
+        origin_x = origin_x + math.floor(((self.dimen.w or 0) - size.w) / 2)
+    end
+    if self.vertical_align == "center" then
+        origin_y = origin_y + math.floor(((self.dimen.h or 0) - size.h) / 2)
+    end
+    local mirrored = BD.mirroredUILayout() and row.allow_mirroring ~= false
+    local n = #row
+    local index_of = {}
+    for i, widget in ipairs(row) do
+        index_of[widget] = i
+    end
+    for _, seg in ipairs(self.segments) do
+        local i = index_of[seg.widget]
+        local off_i = i and (mirrored and (n - i + 1) or i)
+        local off = off_i and row._offsets[off_i]
+        local w_size = seg.widget and seg.widget.getSize and seg.widget:getSize()
+        if off and w_size then
+            seg.rect = Geom:new{
+                x = origin_x + off.x,
+                y = origin_y,
+                w = w_size.w,
+                h = size.h,
+            }
+        else
+            seg.rect = nil
+        end
+    end
+    -- The separator belongs to the crumb before it, so the gap is tappable.
+    local ordered = {}
+    for _, seg in ipairs(self.segments) do
+        if seg.rect then
+            ordered[#ordered + 1] = seg
+        end
+    end
+    table.sort(ordered, function(a, b)
+        return a.rect.x < b.rect.x
+    end)
+    for i, seg in ipairs(ordered) do
+        local nxt = ordered[i + 1]
+        if nxt and nxt.rect.x > seg.rect.x then
+            seg.rect.w = nxt.rect.x - seg.rect.x
+        end
+    end
+end
+
+function Breadcrumb:paintTo(bb, x, y)
+    InputContainer.paintTo(self, bb, x, y)
+    self:_cacheHitRects()
 end
 
 function Breadcrumb:setCrumbs(crumbs)
@@ -99,20 +164,25 @@ function Breadcrumb:setCrumbs(crumbs)
 end
 
 function Breadcrumb:onTapCrumb(_, ges)
-    if not ges or not ges.pos or not self.dimen or not self.dimen:contains(ges.pos) then
+    if not ges or not ges.pos then
         return false
     end
-    -- Hit-test individual crumb labels (skip separators)
-    for _, seg in ipairs(self.segments) do
-        local w = seg.widget
-        if w.dimen and w.dimen:contains(ges.pos) then
-            if self.on_select then
+    if not self.hit_rects then
+        self:_cacheHitRects()
+    end
+    for _, seg in ipairs(self.segments or {}) do
+        if seg.rect and seg.rect:contains(ges.pos) then
+            -- The last crumb is the menu already on screen.
+            if seg.index < #self.crumbs and self.on_select then
                 self.on_select(seg.index)
             end
             return true
         end
     end
-    return true -- consume taps on the breadcrumb band
+    if self.dimen and self.dimen:contains(ges.pos) then
+        return true
+    end
+    return false
 end
 
 return Breadcrumb
