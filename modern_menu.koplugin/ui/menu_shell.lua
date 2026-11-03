@@ -34,13 +34,13 @@ local logger = require("logger")
 local Screen = Device.screen
 local _ = require("gettext")
 
-local QuickMenuHost = require("ui/quickmenu_host")
-local ShortcutsHost = require("ui/shortcuts_host")
-local TabBar = require("ui/tab_bar")
-local Breadcrumb = require("widgets/breadcrumb")
-local MenuItemCard = require("widgets/menu_item_card")
-local Settings = require("settings")
-local StatusBar = require("widgets/status_bar")
+local QuickMenuHost = require("modern_menu.ui.quickmenu_host")
+local ShortcutsHost = require("modern_menu.ui.shortcuts_host")
+local TabBar = require("modern_menu.ui.tab_bar")
+local Breadcrumb = require("modern_menu.widgets.breadcrumb")
+local MenuItemCard = require("modern_menu.widgets.menu_item_card")
+local Settings = require("modern_menu.settings")
+local StatusBar = require("modern_menu.widgets.status_bar")
 
 local ICON_TITLES = {
     ["appbar.navigation"] = _("Navigate"),

@@ -21,11 +21,11 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Screen = Device.screen
 local _ = require("gettext")
 
-local TabBar = require("ui/tab_bar")
-local DisplayTab = require("ui/tabs/display")
-local TypeTab = require("ui/tabs/type")
-local NetworkTab = require("ui/tabs/network")
-local SystemTab = require("ui/tabs/system")
+local TabBar = require("modern_menu.ui.tab_bar")
+local DisplayTab = require("modern_menu.ui.tabs.display")
+local TypeTab = require("modern_menu.ui.tabs.type")
+local NetworkTab = require("modern_menu.ui.tabs.network")
+local SystemTab = require("modern_menu.ui.tabs.system")
 
 local Overlay = InputContainer:extend{
     name = "modern_menu_overlay",
@@ -51,13 +51,13 @@ function Overlay:init()
 
     self.title_widget = TextWidget:new{
         text = _("Quick Settings"),
-        face = require("settings").face(22, "infofont"),
+        face = require("modern_menu.settings").face(22, "infofont"),
         bold = true,
     }
 
     self.close_label = TextWidget:new{
         text = _("Close"),
-        face = require("settings").face(18),
+        face = require("modern_menu.settings").face(18),
         bold = true,
     }
 

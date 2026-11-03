@@ -12,8 +12,8 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Screen = Device.screen
 local _ = require("gettext")
 
-local Slider = require("widgets/slider")
-local ToggleCard = require("widgets/toggle_card")
+local Slider = require("modern_menu.widgets.slider")
+local ToggleCard = require("modern_menu.widgets.toggle_card")
 
 local TypeTab = {}
 
@@ -41,7 +41,7 @@ function TypeTab:build(parent)
     if not doc then
         table.insert(content, TextWidget:new{
             text = _("Open a document to adjust typography."),
-            face = require("settings").face(18),
+            face = require("modern_menu.settings").face(18),
             max_width = width,
         })
         return content

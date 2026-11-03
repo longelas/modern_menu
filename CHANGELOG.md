@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.16.0 — 2026-11-03
+
+Modern Menu stays up when another plugin also has a `settings.lua`.
+
+### Fixes
+- Plugin files load as `modern_menu.*`, so KoInsight (or any plugin that calls `require("settings")` first) can no longer replace this plugin's settings. Opening the menu, including **Modern Menu → Layout**, no longer crashes with `getMenuHeightMode` is nil
+
 ## 1.15.0 — 2026-11-01
 
 The breadcrumb trail has its own font size, and the plugin settings are grouped.

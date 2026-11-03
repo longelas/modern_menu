@@ -24,7 +24,7 @@ local UIManager = require("ui/uimanager")
 local Widget = require("ui/widget/widget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local Screen = Device.screen
-local Settings = require("settings")
+local Settings = require("modern_menu.settings")
 
 local NetworkMgr = require("ui/network/manager")
 

@@ -15,7 +15,7 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Screen = Device.screen
 local _ = require("gettext")
 
-local ToggleCard = require("widgets/toggle_card")
+local ToggleCard = require("modern_menu.widgets.toggle_card")
 
 local NetworkTab = {}
 
@@ -63,7 +63,7 @@ function NetworkTab:build(parent)
 
     table.insert(content, TextWidget:new{
         text = status_text,
-        face = require("settings").face(18),
+        face = require("modern_menu.settings").face(18),
         max_width = width,
     })
     table.insert(content, VerticalSpan:new{ width = Size.span.vertical_default })

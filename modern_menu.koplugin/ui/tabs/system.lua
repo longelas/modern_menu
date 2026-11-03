@@ -16,7 +16,7 @@ local T = require("ffi/util").template
 local Screen = Device.screen
 local _ = require("gettext")
 
-local ToggleCard = require("widgets/toggle_card")
+local ToggleCard = require("modern_menu.widgets.toggle_card")
 
 local SystemTab = {}
 
@@ -56,14 +56,14 @@ function SystemTab:build(parent)
 
     table.insert(content, TextWidget:new{
         text = battery_text(),
-        face = require("settings").face(20),
+        face = require("modern_menu.settings").face(20),
         bold = true,
         max_width = width,
     })
     table.insert(content, VerticalSpan:new{ width = Size.span.vertical_small })
     table.insert(content, TextWidget:new{
         text = storage_text(),
-        face = require("settings").face(18),
+        face = require("modern_menu.settings").face(18),
         max_width = width,
     })
     table.insert(content, VerticalSpan:new{ width = Size.span.vertical_large })

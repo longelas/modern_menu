@@ -12,8 +12,8 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Screen = Device.screen
 local _ = require("gettext")
 
-local ToggleCard = require("widgets/toggle_card")
-local Slider = require("widgets/slider")
+local ToggleCard = require("modern_menu.widgets.toggle_card")
+local Slider = require("modern_menu.widgets.slider")
 
 local DisplayTab = {}
 

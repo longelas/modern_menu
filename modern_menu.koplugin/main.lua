@@ -7,9 +7,28 @@ Never mounts a status bar in the reader — stock CRE/header customization cover
 @module koplugin.modern_menu
 --]]
 
-local plugin_dir = debug.getinfo(1, "S").source:match("@(.*/)")
-if plugin_dir then
-    package.path = plugin_dir .. "?.lua;" .. plugin_dir .. "?/init.lua;" .. package.path
+-- require() caches modules for the whole process. KOReader also puts every
+-- plugin directory on package.path, so require("settings") returns whichever
+-- plugin loaded a file of that name first. KoInsight ships settings.lua and
+-- loads before this plugin, which made Settings.getMenuHeightMode nil.
+-- Our modules use the modern_menu.* name, resolved from this directory.
+local plugin_dir = debug.getinfo(1, "S").source:match("^@(.*/)")
+local searchers = package.searchers or package.loaders
+if plugin_dir and searchers and not package.loaded["modern_menu.__searcher"] then
+    local prefix = "modern_menu."
+    table.insert(searchers, 1, function(modname)
+        if modname:sub(1, #prefix) ~= prefix then
+            return
+        end
+        local rel = modname:sub(#prefix + 1):gsub("%.", "/")
+        local path = plugin_dir .. rel .. ".lua"
+        local loader, err = loadfile(path)
+        if not loader then
+            return "\n\tno file '" .. path .. "' (" .. tostring(err) .. ")"
+        end
+        return loader
+    end)
+    package.loaded["modern_menu.__searcher"] = true
 end
 
 local CenterContainer = require("ui/widget/container/centercontainer")
@@ -23,11 +42,11 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 local Screen = Device.screen
 
-local ModernMenuShell = require("ui/menu_shell")
-local QuickMenuHost = require("ui/quickmenu_host")
-local ShortcutsHost = require("ui/shortcuts_host")
-local Settings = require("settings")
-local StatusBar = require("widgets/status_bar")
+local ModernMenuShell = require("modern_menu.ui.menu_shell")
+local QuickMenuHost = require("modern_menu.ui.quickmenu_host")
+local ShortcutsHost = require("modern_menu.ui.shortcuts_host")
+local Settings = require("modern_menu.settings")
+local StatusBar = require("modern_menu.widgets.status_bar")
 
 local ModernMenu = InputContainer:extend{
     name = "modern_menu",
@@ -127,7 +146,6 @@ end
 
 function ModernMenu:init()
     self:_installKoboldMenuAccess()
-    self:_installPackagePath()
     self:onDispatcherRegisterActions()
     self.use_stock_menu = G_reader_settings and G_reader_settings:isTrue("modern_menu_use_stock") or false
 
@@ -661,16 +679,6 @@ function ModernMenu:addToMainMenu(menu_items)
             },
         },
     }
-end
-
-function ModernMenu:_installPackagePath()
-    local dir = self.path or plugin_dir
-    if not dir then return end
-    if dir:sub(-1) ~= "/" then dir = dir .. "/" end
-    local needle = dir .. "?.lua"
-    if not package.path:find(needle, 1, true) then
-        package.path = dir .. "?.lua;" .. dir .. "?/init.lua;" .. package.path
-    end
 end
 
 function ModernMenu:_registerMainMenu()

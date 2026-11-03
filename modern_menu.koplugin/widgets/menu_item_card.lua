@@ -19,8 +19,8 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local Device = require("device")
 local Screen = Device.screen
 
-local ToggleSwitch = require("widgets/toggle_switch")
-local Settings = require("settings")
+local ToggleSwitch = require("modern_menu.widgets.toggle_switch")
+local Settings = require("modern_menu.settings")
 
 local MenuItemCard = InputContainer:extend{
     item = nil,

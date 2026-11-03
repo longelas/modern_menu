@@ -13,7 +13,7 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local TextWidget = require("ui/widget/textwidget")
 local Device = require("device")
 local Screen = Device.screen
-local Settings = require("settings")
+local Settings = require("modern_menu.settings")
 
 local Breadcrumb = InputContainer:extend{
     crumbs = nil, -- { "Library", "Settings", ... }

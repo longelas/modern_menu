@@ -18,7 +18,7 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Device = require("device")
 local Screen = Device.screen
 
-local Settings = require("settings")
+local Settings = require("modern_menu.settings")
 
 local TabBar = InputContainer:extend{
     tabs = nil,

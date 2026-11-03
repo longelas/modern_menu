@@ -33,7 +33,7 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local datetime = require("datetime")
 local logger = require("logger")
-local Settings = require("settings")
+local Settings = require("modern_menu.settings")
 local Screen = Device.screen
 local _ = require("gettext")
 

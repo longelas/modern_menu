@@ -40,7 +40,7 @@ function ToggleCard:init()
 
     self.title_widget = TextWidget:new{
         text = self.title,
-        face = require("settings").face(20),
+        face = require("modern_menu.settings").face(20),
         max_width = (self.width or Screen:getWidth()) - Screen:scaleBySize(100),
     }
 
@@ -52,7 +52,7 @@ function ToggleCard:init()
     if self.subtitle and self.subtitle ~= "" then
         table.insert(left_column, TextWidget:new{
             text = self.subtitle,
-            face = require("settings").face(18, "cfont"),
+            face = require("modern_menu.settings").face(18, "cfont"),
             fgcolor = Blitbuffer.COLOR_DARK_GRAY,
             max_width = (self.width or Screen:getWidth()) - Screen:scaleBySize(100),
         })
@@ -60,7 +60,7 @@ function ToggleCard:init()
 
     self.state_widget = TextWidget:new{
         text = self.checked and _("ON") or _("OFF"),
-        face = require("settings").face(18),
+        face = require("modern_menu.settings").face(18),
         bold = true,
         fgcolor = self.checked and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK,
     }

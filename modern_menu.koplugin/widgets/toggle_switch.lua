@@ -9,7 +9,7 @@ local Size = require("ui/size")
 local Widget = require("ui/widget/widget")
 local Device = require("device")
 local Screen = Device.screen
-local Settings = require("settings")
+local Settings = require("modern_menu.settings")
 
 local ToggleSwitch = Widget:extend{
     checked = false,
